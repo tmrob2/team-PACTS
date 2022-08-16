@@ -3,7 +3,7 @@ import ce
 NUM_AGENTS = 2
 NUM_TASKS = 4
 
-agent = ce.Agent(0, list(range(5)), [1, 2])
+agent = ce.Agent(0, list(range(5)), [0, 1])
 # for this experiment we just want some identical copies of the agents
 # define agent transitions
 agent.add_transition(0, 0, [(0, 0.01, ""), (1, 0.99, "init")])
@@ -56,5 +56,6 @@ if __name__ == "__main__":
     product_mdp = ce.build_model(initial_state, agent, mission.get_task(0), 0, 0)
     product_mdp.print_transitions()
     product_mdp.print_rewards()
-    scpm = ce.SCPM(team, mission)
-    ce.value_iteration(scpm)
+    ce.vi_test(product_mdp)
+    #scpm = ce.SCPM(team, mission)
+    #ce.value_iteration(scpm)

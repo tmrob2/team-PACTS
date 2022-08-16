@@ -1,3 +1,4 @@
+#![allow(non_snake_case)]
 
 pub mod scpm;
 pub mod agent;
@@ -9,12 +10,15 @@ pub mod c_binding;
 use std::hash::Hash;
 use pyo3::prelude::*;
 use hashbrown::HashMap;
-use scpm::model::{build_model, SCPM};
+use scpm::model::{build_model, SCPM, MOProductMDP};
 use agent::agent::{Agent, Team};
 use dfa::dfa::{DFA, Mission};
 use parallel::{threaded::process_mdps, grid};
 use c_binding::suite_sparse::*;
+extern crate blis_src;
+extern crate cblas_sys;
 use cblas_sys::{cblas_dcopy, cblas_dgemv, cblas_dscal, cblas_ddot};
+use algorithm::dp::value_iteration;
 
 
 const UNSTABLE_POLICY: i32 = 5;
@@ -261,9 +265,11 @@ where T: Clone + Hash, U: Clone + Hash + Eq {
 }
 
 #[pyfunction]
-fn value_iteration(model: &SCPM) {
-    let prods = model.construct_products();
-    process_mdps(prods);
+#[pyo3(name="vi_test")]
+fn value_iteration_test(model: &MOProductMDP) {
+    //let prods = model.construct_products();
+    //process_mdps(prods);
+    value_iteration(model, &[0.5, 0.5], &0.001);
 }
 
 /// A Python module implemented in Rust.
@@ -276,6 +282,6 @@ fn ce(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<Team>()?;
     m.add_class::<SCPM>()?;
     m.add_function(wrap_pyfunction!(build_model, m)?)?;
-    m.add_function(wrap_pyfunction!(value_iteration, m)?)?;
+    m.add_function(wrap_pyfunction!(value_iteration_test, m)?)?;
     Ok(())
 }

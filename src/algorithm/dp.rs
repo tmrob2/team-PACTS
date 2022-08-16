@@ -1,10 +1,10 @@
+#![allow(non_snake_case)]
 use crate::scpm::model::MOProductMDP;
 use crate::*;
 use hashbrown::HashMap;
 use rand::seq::SliceRandom;
 use float_eq::float_eq;
 
-#[allow(non_snake_case)]
 /// Given a Product MDP, and a weight vector perform a multi-objective 
 /// value-policy iteration to generate a simple scheduler which is an optimal 
 /// solution to this problem
@@ -90,7 +90,7 @@ pub fn value_iteration(prod: &MOProductMDP, w: &[f64], eps: &f64) {
     }
 
     let argmaxP = construct_argmax_spPmatrix(prod, &pi[..]);
-    let argmaxR = construct_argmax_Rmatrix(prod,  &pi[..]);
+    let argmaxR = construct_argmax_Rmatrix(prod,  &pi[..], &R);
 
     epsilon = 1.0;
 
@@ -150,6 +150,12 @@ pub fn value_iteration(prod: &MOProductMDP, w: &[f64], eps: &f64) {
         }
     }
 
+    let mut r: Vec<f64> = vec![0.; 2];
+    // get the index of the initial state
+    let init_idx = prod.get_state_map().get(&prod.initial_state).unwrap();
+    r[0] = X[*init_idx];
+    r[1] = X[size + *init_idx];
+    println!("r: {:.3?}", r);
 }
 
 fn random_policy(prod: &MOProductMDP) -> Vec<f64> {
@@ -270,18 +276,19 @@ fn construct_rewards_matrices(prod: &MOProductMDP) -> HashMap<i32, DenseMatrix> 
 }
 
 #[allow(non_snake_case)]
-fn construct_argmax_Rmatrix(prod: &MOProductMDP, pi: &[f64]) -> DenseMatrix {
+fn construct_argmax_Rmatrix(
+    prod: &MOProductMDP, 
+    pi: &[f64], 
+    rmatricies: &HashMap<i32, DenseMatrix>
+) -> DenseMatrix {
     let size = prod.states.len();
     let mut R: Vec<f64> = vec![0.; size * 2];
     for state in prod.states.iter() {
         let row_idx = prod.get_state_map().get(state).unwrap();
         let action = pi[*row_idx] as i32;
-        match prod.rewards.get(&(*state, action)) {
-            Some(r) => {
-                R[*row_idx] = r[0];
-                R[size + *row_idx] = r[1];
-            }
-            None => { }
+        let rewards = rmatricies.get(&action).unwrap();
+        for c in 0..2 {
+            R[c * size + *row_idx] = rewards.m[c * size + *row_idx];
         }
     }
     DenseMatrix {
@@ -319,6 +326,7 @@ fn value_for_init_policy(R: &mut [f64], x: &mut [f64], eps: &f64, argmaxP: &Spar
     while (epsilon > *eps) && (unstable_count < UNSTABLE_POLICY) {
         let mut vmv = vec![0f64; argmaxP.nr];
         sp_mv_multiply_f64(argmaxP.m, &x[..], &mut vmv[..]);
+        add_vecs(&mut R[..], &mut vmv[..], argmaxP.nr as i32, 1.0);
         copy(&vmv[..], &mut xnew[..argmaxP.nr], argmaxP.nr as i32);
         add_vecs(&xnew[..], &mut x[..], argmaxP.nc as i32, -1.0);
         epsilon = max_eps(&x[..]);
