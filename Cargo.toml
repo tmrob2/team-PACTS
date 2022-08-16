@@ -1,0 +1,18 @@
+[package]
+name = "ce"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[lib]
+name = "ce"
+crate-type = ["cdylib", "lib"]
+
+[dependencies]
+pyo3 = { version = "0.16.5", features = ["extension-module"] }
+hashbrown = "0.12"
+rand = "0.8.5"
+threadpool = "1.8.1"
+blis-src = { version = "0.2", features = ["cblas", "static"] }
+cblas-sys = "0.1.4"
+float_eq = "1.0.0"
