@@ -16,3 +16,4 @@ threadpool = "1.8.1"
 blis-src = { version = "0.2", features = ["cblas", "static"] }
 cblas-sys = "0.1.4"
 float_eq = "1.0.0"
+gurobi = "0.3.4"

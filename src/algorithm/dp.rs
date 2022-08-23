@@ -8,13 +8,15 @@ use float_eq::float_eq;
 /// Given a Product MDP, and a weight vector perform a multi-objective 
 /// value-policy iteration to generate a simple scheduler which is an optimal 
 /// solution to this problem
-pub fn value_iteration(prod: &MOProductMDP, w: &[f64], eps: &f64) {
+pub fn value_iteration(prod: &MOProductMDP, w: &[f64], eps: &f64) 
+    -> (Vec<f64>, Vec<f64>) {
     let size = prod.states.len();
 
     // we will need to construct a set of size x size 
     // transition matrices for each action
     let P = construct_spblas_matrices(prod);
     let R = construct_rewards_matrices(prod);
+
     let mut x = vec![0f64; size]; // value vector for agent-task pair
     let mut xnew = vec![0f64; size]; // new value vector for agent-task pair
     let mut xtemp = vec![0f64; size]; // a temporary vector used for copying
@@ -155,7 +157,7 @@ pub fn value_iteration(prod: &MOProductMDP, w: &[f64], eps: &f64) {
     let init_idx = prod.get_state_map().get(&prod.initial_state).unwrap();
     r[0] = X[*init_idx];
     r[1] = X[size + *init_idx];
-    println!("r: {:.3?}", r);
+    (pi, r)
 }
 
 fn random_policy(prod: &MOProductMDP) -> Vec<f64> {
@@ -315,7 +317,12 @@ fn construct_argmax_Rvector(prod: &MOProductMDP, pi: &[f64]) -> Vec<f64> {
     R
 }
 
-fn value_for_init_policy(R: &mut [f64], x: &mut [f64], eps: &f64, argmaxP: &SparseMatrix) {
+fn value_for_init_policy(
+    R: &mut [f64], 
+    x: &mut [f64], 
+    eps: &f64, 
+    argmaxP: &SparseMatrix
+) {
     let mut epsilon: f64 = 1.0;
     let mut xnew: Vec<f64> = vec![0.; argmaxP.nc];
     let mut epsold: Vec<f64> = vec![0.; argmaxP.nc];
@@ -330,7 +337,6 @@ fn value_for_init_policy(R: &mut [f64], x: &mut [f64], eps: &f64, argmaxP: &Spar
         copy(&vmv[..], &mut xnew[..argmaxP.nr], argmaxP.nr as i32);
         add_vecs(&xnew[..], &mut x[..], argmaxP.nc as i32, -1.0);
         epsilon = max_eps(&x[..]);
-        //println!("eps: {:?}", epsilon);
         inf_indices = x[..argmaxP.nr].iter()
             .zip(epsold.iter())
             .enumerate()
@@ -361,7 +367,6 @@ fn value_for_init_policy(R: &mut [f64], x: &mut [f64], eps: &f64, argmaxP: &Spar
         epsilon_old = epsilon;
     }
     if unstable_count >= UNSTABLE_POLICY {
-        //println!("inf indices: {:?}", inf_indices_old);
         for ix in inf_indices_old.iter() {
             if x[*ix as usize] < 0. {
                 x[*ix as usize] = -f32::MAX as f64;

@@ -1,4 +1,5 @@
 #![allow(non_snake_case)]
+#![allow(dead_code)]
 
 pub mod scpm;
 pub mod agent;
@@ -6,19 +7,23 @@ pub mod dfa;
 pub mod parallel;
 pub mod algorithm;
 pub mod c_binding;
+pub mod lp;
 
 use std::hash::Hash;
+use std::mem;
 use pyo3::prelude::*;
 use hashbrown::HashMap;
 use scpm::model::{build_model, SCPM, MOProductMDP};
+use algorithm::synth::{process_scpm, scheduler_synthesis, alloc_dfs};
 use agent::agent::{Agent, Team};
 use dfa::dfa::{DFA, Mission};
-use parallel::{threaded::process_mdps, grid};
+//use parallel::{threaded::process_mdps};
 use c_binding::suite_sparse::*;
 extern crate blis_src;
 extern crate cblas_sys;
 use cblas_sys::{cblas_dcopy, cblas_dgemv, cblas_dscal, cblas_ddot};
 use algorithm::dp::value_iteration;
+use float_eq::float_eq;
 
 
 const UNSTABLE_POLICY: i32 = 5;
@@ -57,7 +62,6 @@ impl DenseMatrix {
 }
 
 #[derive(Debug)]
-// We should be able to run Rayon with this structure
 pub struct COO {
     pub nzmax: i32,
     pub nr: i32,
@@ -215,9 +219,10 @@ fn blas_matrix_vector_mulf64(matrix: &[f64], v: &[f64], m: i32, n: i32, result: 
     }
 }
 
-//-----------------------------------
-//  Value Iteration Helpers
-//
+// -----------------------------------------------------------
+//  Value iteration helpers
+// -----------------------------------------------------------
+
 fn max_eps(x: &[f64]) -> f64 {
     *x.iter().max_by(|a, b| a.partial_cmp(&b).expect("No NaNs allowed")).unwrap()
 }
@@ -255,7 +260,7 @@ fn max_values(x: &mut [f64], q: &[f64], pi: &mut [f64], ns: usize, na: usize) {
     }
 }
 
-//-----------------------------------=
+//-------------------------------------
 pub fn reverse_key_value_pairs<T, U>(map: &HashMap<T, U>) -> HashMap<U, T> 
 where T: Clone + Hash, U: Clone + Hash + Eq {
     map.into_iter().fold(HashMap::new(), |mut acc, (a, b)| {
@@ -264,12 +269,80 @@ where T: Clone + Hash, U: Clone + Hash + Eq {
     })
 }
 
+#[derive(Hash, Eq, PartialEq)]
+pub struct Mantissa((u64, i16, i8));
+
+impl Mantissa {
+    pub fn new(val: f64) -> Mantissa {
+        Mantissa(integer_decode(val))
+    }
+}
+
+pub fn integer_decode(val: f64) -> (u64, i16, i8) {
+    let bits: u64 = unsafe { mem::transmute(val) };
+    let sign: i8 = if bits >> 63 == 0 { 1 } else { -1 };
+    let mut exponent: i16 = ((bits >> 52 ) & 0x7ff ) as i16;
+    let mantissa = if exponent == 0 {
+        (bits & 0xfffffffffffff ) << 1
+    } else {
+        (bits & 0xfffffffffffff) | 0x10000000000000
+    };
+
+    exponent -= 1023 + 52;
+    (mantissa, exponent, sign)
+}
+
+/// This method will adjust any values close to zero as zeroes, correcting LP rounding errors
+pub fn val_or_zero_one(val: &f64) -> f64 {
+    if float_eq!(*val, 0., abs <= 0.25 * f64::EPSILON) {
+        0.
+    } else if float_eq!(*val, 1., abs <= 0.25 * f64::EPSILON) {
+        1.
+    } else {
+        *val
+    }
+}
+//--------------------------------------
+// Python lp wrappers, for linear programming scripts
+//--------------------------------------
+fn solver(hullset: Vec<Vec<f64>>, t: Vec<f64>, nobjs: usize) -> Result<Vec<f64>, Box<dyn std::error::Error>> {
+    let solver_script_call = include_str!("lp/pylp.py");
+    let result: Vec<f64> = Python::with_gil(|py| -> PyResult<Vec<f64>> {
+        let lpsolver = PyModule::from_code(py, solver_script_call, "", "")?;
+        let solver_result = lpsolver.getattr("hyperplane_solver")?.call1((hullset, t, nobjs,))?.extract()?;
+        Ok(solver_result)
+    }).unwrap();
+    Ok(result)
+}
+
+
+//--------------------------------------
+// Some testing functions for python testing of Rust API
+//--------------------------------------
+
 #[pyfunction]
 #[pyo3(name="vi_test")]
-fn value_iteration_test(model: &MOProductMDP) {
+fn value_iteration_test(model: &MOProductMDP, w: Vec<f64>) {
     //let prods = model.construct_products();
     //process_mdps(prods);
-    value_iteration(model, &[0.5, 0.5], &0.001);
+    let r = value_iteration(model, &w[..], &0.001);
+    println!("r: {:?}", r);
+}
+
+#[pyfunction]
+#[pyo3(name="alloc_test")]
+fn test_alloc(model: &SCPM, w: Vec<f64>, eps: f64) {
+    let prods = model.construct_products();
+    let (_r, _prods, pis) = process_scpm(model, &w[..], &eps, model.agents.size, prods);
+    println!("{:?}", pis);
+}
+
+#[pyfunction]
+#[pyo3(name="scheduler_synthesis")]
+fn meta_scheduler_synthesis(model: &SCPM, w: Vec<f64>, eps: f64, target: Vec<f64>) {
+    let prods = model.construct_products();
+    let (pis, _hullset, _t_new) = scheduler_synthesis(model, &w[..], &eps, &target[..], prods);
+    println!("{:?}", pis);
 }
 
 /// A Python module implemented in Rust.
@@ -283,5 +356,8 @@ fn ce(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<SCPM>()?;
     m.add_function(wrap_pyfunction!(build_model, m)?)?;
     m.add_function(wrap_pyfunction!(value_iteration_test, m)?)?;
+    m.add_function(wrap_pyfunction!(test_alloc, m)?)?;
+    m.add_function(wrap_pyfunction!(meta_scheduler_synthesis, m)?)?;
+    //m.add_function(wrap_pyfunction!(process_scpm, m)?)?;
     Ok(())
 }

@@ -1,7 +1,7 @@
 import ce
 
 NUM_AGENTS = 2
-NUM_TASKS = 4
+NUM_TASKS = 2
 
 agent = ce.Agent(0, list(range(5)), [0, 1])
 # for this experiment we just want some identical copies of the agents
@@ -53,9 +53,15 @@ if __name__ == "__main__":
     #print(f"Rust calc sum: (5, 20) = {ce.sum_as_string(5, 20)}")
     initial_state = (0, 0)
     # test creating the product mdp
+    print("Testing task 0")
     product_mdp = ce.build_model(initial_state, agent, mission.get_task(0), 0, 0)
     product_mdp.print_transitions()
     product_mdp.print_rewards()
-    ce.vi_test(product_mdp)
-    #scpm = ce.SCPM(team, mission)
-    #ce.value_iteration(scpm)
+    
+    ce.vi_test(product_mdp, [0., 1.])
+    scpm = ce.SCPM(team, mission)
+    #w = [0] * NUM_AGENTS + [1 / NUM_TASKS] * NUM_TASKS
+    w = [1 / (NUM_AGENTS + NUM_TASKS)] * ( NUM_AGENTS + NUM_TASKS )
+    #scpm.print_transitions()
+    #ce.alloc_test(scpm, w, 0.001)
+    ce.scheduler_synthesis(scpm, w, 0.0001, [-9., -9., 0.98, 0.98])
