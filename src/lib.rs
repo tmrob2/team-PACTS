@@ -315,6 +315,36 @@ fn solver(hullset: Vec<Vec<f64>>, t: Vec<f64>, nobjs: usize) -> Result<Vec<f64>,
     Ok(result)
 }
 
+fn new_target(
+    hullset: Vec<Vec<f64>>, 
+    weights: Vec<Vec<f64>>, 
+    target: Vec<f64>,
+    l: usize,
+    m: usize,
+    n: usize,
+    iteration: usize,
+    cstep: f64,
+    pstep: f64
+) {
+    let new_target_script = include_str!("lp/pylp.py");
+    let result: Vec<f64> = Python::with_gil(|py| -> PyResult<Vec<f64>> {
+        let lpnewtarget = PyModule::from_code(py, new_target_script, "", "")?;
+        let lpnewtarget_result = lpnewtarget.getattr("")?.call1((
+            hullset,
+            weights,
+            target,
+            l,
+            m,
+            n,
+            iteration,
+            cstep
+            pstep
+        ))?.extract()?;
+        Ok(lpnewtarget)
+    });
+    Ok(result)
+}
+
 
 //--------------------------------------
 // Some testing functions for python testing of Rust API

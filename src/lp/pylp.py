@@ -24,7 +24,7 @@ def hyperplane_solver(X, t, nobj):
     solution = [value(w[i]) for i in range(nobj)]
     return solution
 
-def new_target(X, W, t, l, m, n, ii, cstep, pstep):
+def new_target_(X, W, t, l, m, n, ii, cstep, pstep):
     # n - num agents
     # m - num tasks
     # ii - iterations

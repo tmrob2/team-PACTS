@@ -3,7 +3,6 @@ use crate::scpm::model::{SCPM, MOProductMDP, GridState};
 use crate::{Mantissa, blas_dot_product, val_or_zero_one, solver};
 use pyo3::prelude::*;
 use crate::parallel::threaded::process_mdps;
-//use crate::lp::lp_solver::{new_target, gurobi_solver};
 
 //#[pyfunction]
 //#[pyo3(name="para_test")]
@@ -114,37 +113,36 @@ pub fn scheduler_synthesis(model: &SCPM, w: &[f64], eps: &f64, t: &[f64], prods_
     let wt = blas_dot_product(&tnew[..], &w[..]);
 
     if wrl < wt {
-        return (schedulers, hullset, tnew)
-        //let mut temp_hullset = hullset.clone();
-        //temp_hullset.insert(0, r.to_vec());
-        //let mut temp_weights = weights.clone();
-        //temp_weights.insert(0, w.to_vec());
-        //let mut tnew_found = false;
-        //let mut iterations = 1;
-        //while !tnew_found {
-        //    let tnew_result = new_target(
-        //        &temp_hullset, 
-        //        &temp_weights, 
-        //        &tnew[..], 
-        //        1, 
-        //        model.tasks.size,
-        //        model.agents.size,
-        //        5.,
-        //        0.01,
-        //        iterations
-        //    );
-        //    match tnew_result {
-        //        Ok(x) => {
-        //            println!("tnew: {:?}", x);
-        //            tnew = x;
-        //            tnew_found = true;
-        //            //return (schedulers, hullset, x)
-        //        }
-        //        Err(_) => {
-        //            iterations += 1;
-        //        }
-        //    }
-        //}
+        let mut temp_hullset = hullset.clone();
+        temp_hullset.insert(0, r.to_vec());
+        let mut temp_weights = weights.clone();
+        temp_weights.insert(0, w.to_vec());
+        let mut tnew_found = false;
+        let mut iterations = 1;
+        while !tnew_found {
+            let tnew_result = new_target(
+                &temp_hullset, 
+                &temp_weights, 
+                &tnew[..], 
+                1, 
+                model.tasks.size,
+                model.agents.size,
+                5.,
+                0.01,
+                iterations
+            );
+            match tnew_result {
+                Ok(x) => {
+                    println!("tnew: {:?}", x);
+                    tnew = x;
+                    tnew_found = true;
+                    //return (schedulers, hullset, x)
+                }
+                Err(_) => {
+                    iterations += 1;
+                }
+            }
+        }
     }
 
     hullset.insert(0, r.to_vec());
