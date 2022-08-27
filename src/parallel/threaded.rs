@@ -15,6 +15,7 @@ pub fn process_mdps(
     w: &[f64], 
     eps: &f64,
     num_agents: usize,
+    num_tasks: usize
 ) -> Result<(
         Vec<MOProductMDP>, 
         HashMap<(i32, i32), Vec<f64>>,
@@ -22,7 +23,7 @@ pub fn process_mdps(
     ), 
     Box<dyn std::error::Error>> {
 
-    let t1 = Instant::now();
+    //let t1 = Instant::now();
     let mut mdp_return_vec: Vec<MOProductMDP> = Vec::new();
     let mut result: HashMap<(i32, i32), Vec<f64>> = HashMap::new();
     let mut pis: HashMap<(i32, i32), Vec<f64>> = HashMap::new();
@@ -33,9 +34,10 @@ pub fn process_mdps(
     let eps_copy = *eps;
     for mdp in mdps.into_iter() {
         let tx = tx.clone();
-        let w_k_ = vec![w[mdp.agent_id as usize], w[num_agents + mdp.task_id as usize]];
+        //let w_k_ = vec![w[mdp.agent_id as usize], w[num_agents + mdp.task_id as usize]];
+        let w_ = w.to_vec();
         pool.execute(move || {
-            let (mdp, pi, r) = compute_value(mdp, w_k_, eps_copy);
+            let (mdp, pi, r) = compute_value(mdp, w_, eps_copy, num_agents, num_tasks);
             tx.send((mdp, pi, r)).expect("Could not send data!");
         });
     }
@@ -47,14 +49,14 @@ pub fn process_mdps(
         mdp_return_vec.push(mdp);
     }
     
-    println!("time: {:?}, Result: {:.2?}", t1.elapsed().as_millis(), result);
+    //println!("time: {:?}, Result: {:.2?} \n {:?}", t1.elapsed().as_secs_f64(), result, pis);
     Ok((mdp_return_vec, pis, result))
 }
 
 /// This function could be turned into value iteration
-fn compute_value(mdp: MOProductMDP, w: Vec<f64>, eps: f64) 
+fn compute_value(mdp: MOProductMDP, w: Vec<f64>, eps: f64, nagents: usize, ntasks: usize) 
     -> (MOProductMDP, Vec<f64>, Vec<f64>) {
-    let (pi, r) = value_iteration(&mdp, &w[..], &eps);
-    println!("mdp({},{}) -> {:.3?}", mdp.agent_id, mdp.task_id, r);
+    let (pi, r) = value_iteration(&mdp, &w[..], &eps, nagents, ntasks);
+    //println!("mdp({},{}) -> {:.3?}", mdp.agent_id, mdp.task_id, r);
     (mdp, pi, r)
 }

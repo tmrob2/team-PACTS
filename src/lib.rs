@@ -239,7 +239,6 @@ fn update_policy(eps: &[f64], thresh: &f64, pi: &mut [f64], pi_new: &[f64],
     ns: usize, policy_stable: &mut bool) {
     for ii in 0..ns {
         if eps[ii] > *thresh {
-            // println!("ix: {}, eps {}, action: {:?}", ii, eps[ii], pi_new[ii]);
             // update the action in pi with pnew
             pi[ii] = pi_new[ii];
             *policy_stable = false
@@ -249,6 +248,7 @@ fn update_policy(eps: &[f64], thresh: &f64, pi: &mut [f64], pi_new: &[f64],
 
 fn max_values(x: &mut [f64], q: &[f64], pi: &mut [f64], ns: usize, na: usize) {
     for ii in 0..ns {
+        //println!("q: {:?}", &q[ii*na..(ii + 1)*na]);
         let (imax, max) = q[ii*na..(ii + 1)*na]
             .iter()
             .enumerate()
@@ -325,11 +325,11 @@ fn new_target(
     iteration: usize,
     cstep: f64,
     pstep: f64
-) {
+) -> Result<Vec<f64>, Box<dyn std::error::Error>> {
     let new_target_script = include_str!("lp/pylp.py");
     let result: Vec<f64> = Python::with_gil(|py| -> PyResult<Vec<f64>> {
         let lpnewtarget = PyModule::from_code(py, new_target_script, "", "")?;
-        let lpnewtarget_result = lpnewtarget.getattr("")?.call1((
+        let lpnewtarget_result = lpnewtarget.getattr("new_target_")?.call1((
             hullset,
             weights,
             target,
@@ -337,11 +337,11 @@ fn new_target(
             m,
             n,
             iteration,
-            cstep
+            cstep,
             pstep
         ))?.extract()?;
-        Ok(lpnewtarget)
-    });
+        Ok(lpnewtarget_result)
+    }).unwrap();
     Ok(result)
 }
 
@@ -352,10 +352,10 @@ fn new_target(
 
 #[pyfunction]
 #[pyo3(name="vi_test")]
-fn value_iteration_test(model: &MOProductMDP, w: Vec<f64>) {
+fn value_iteration_test(model: &MOProductMDP, w: Vec<f64>, nagents: usize, ntasks: usize) {
     //let prods = model.construct_products();
     //process_mdps(prods);
-    let r = value_iteration(model, &w[..], &0.001);
+    let r = value_iteration(model, &w[..], &0.001, nagents, ntasks);
     println!("r: {:?}", r);
 }
 
@@ -363,8 +363,9 @@ fn value_iteration_test(model: &MOProductMDP, w: Vec<f64>) {
 #[pyo3(name="alloc_test")]
 fn test_alloc(model: &SCPM, w: Vec<f64>, eps: f64) {
     let prods = model.construct_products();
-    let (_r, _prods, pis) = process_scpm(model, &w[..], &eps, model.agents.size, prods);
-    println!("{:?}", pis);
+    let (r, _prods, pis) = process_scpm(model, &w[..], &eps, model.agents.size, model.tasks.size, prods);
+    println!("r {:?}", r);
+    println!("pis {:?}", pis);
 }
 
 #[pyfunction]
@@ -372,7 +373,7 @@ fn test_alloc(model: &SCPM, w: Vec<f64>, eps: f64) {
 fn meta_scheduler_synthesis(model: &SCPM, w: Vec<f64>, eps: f64, target: Vec<f64>) {
     let prods = model.construct_products();
     let (pis, _hullset, _t_new) = scheduler_synthesis(model, &w[..], &eps, &target[..], prods);
-    println!("{:?}", pis);
+    //println!("{:?}", pis);
 }
 
 /// A Python module implemented in Rust.

@@ -4,6 +4,8 @@ use crate::agent::agent::{Agent, Team};
 use crate::dfa::dfa::{DFA, Mission};
 use std::collections::VecDeque;
 use crate::*;
+use crate::algorithm::dp::value_for_init_policy_dense;
+use rand::seq::SliceRandom;
 
 
 #[pyclass]
@@ -278,6 +280,39 @@ impl SCPM {
         }
     }
 
+    pub fn print_rewards_matrices(
+        &self, 
+        blas_rewards_matrices: &HashMap<i32, DenseMatrix>
+    ) {
+        for action in self.grid.actions.iter() {
+            let m = blas_rewards_matrices.get(action).unwrap();
+            for r in 0..m.rows + 1 {
+                for c in 0..m.cols + 1 {
+                    if r == 0 {
+                        if c == 0 {
+                            print!("{0:width$}", "",width=5);
+                        } else {
+                            print!("[o[{}]]", c-1);
+                        }
+                    } else {
+                        if c == 0 {
+                            let g = self.grid.states[r - 1];
+                            print!("[{},{}]", g.agent, g.task)
+                        } else {
+                            let pval = if m.m[(c-1) * m.rows + (r-1)] == -f32::MAX as f64 {
+                                f64::NEG_INFINITY
+                            } else {
+                                m.m[(c-1) * m.rows + (r-1)]
+                            };
+                            print!("{:.2} ", pval);
+                        }
+                    }
+                }
+                println!();
+            }
+        }
+    }
+
     pub fn insert_rewards(
         &self, 
         rewards: HashMap<(i32, i32), Vec<f64>>
@@ -304,9 +339,9 @@ impl SCPM {
         blas_transition_matrices: &HashMap<i32, DenseMatrix>,
         blas_rewards_matrices: &HashMap<i32, DenseMatrix>
     ) -> (Vec<f64>, Vec<f64>) {
-        let mut pi: Vec<f64> = vec![0.; self.grid.states.len() - 1];
+        //let mut pi: Vec<f64> = vec![0.; self.grid.states.len() - 1];
         let mut r: Vec<f64> = vec![0.; self.agents.size + self.tasks.size];
-        let mut epsilon = 1.0;
+        //let mut epsilon = 1.0;
         let size = self.grid.states.len();
         let nobjs = self.agents.size + self.tasks.size;
 
@@ -323,7 +358,21 @@ impl SCPM {
         let mut Xnew: Vec<f64> = vec![0.; size * nobjs];
         let mut Xtemp: Vec<f64> = vec![0.; size * nobjs];
 
-        while epsilon > *eps {
+        let mut pi = self.grid.rand_proper_policy(self.tasks.size);
+        //println!("initial policy: {:?}", pi);
+
+        // todo: need to compute the value of the initial policy
+        let Pinit = self.argmaxP(&pi[..], blas_transition_matrices);
+        let Rv = self.argmaxRv(&pi[..], blas_rewards_matrices);
+        //println!("initial Rv_pi: {:.3?}", Rv.m);
+
+        value_for_init_policy_dense(&Rv.m[..], &mut x[..], eps, &Pinit);
+        let mut pi_new = vec![-1f64; size - 1];
+        //println!("initial value vector: {:.3?}", x);
+
+        let mut policy_stable = false;
+        while !policy_stable {
+            policy_stable = true;
             // for each action compute the value vector
             for action in self.grid.actions.iter() {
                 let mut vmv = vec![0f64; size - 1];
@@ -334,23 +383,30 @@ impl SCPM {
                 // perform the operation R.w
                 let mut rmv = vec![0f64; size - 1];
                 let Ra = blas_rewards_matrices.get(action).unwrap();
+                //println!("w: {:?}\n R:{:.3?}", w, Ra.m);
                 blas_matrix_vector_mulf64(&Ra.m[..], &w[..], Ra.rows as i32, Ra.cols as i32, &mut rmv[..]);
+                //println!("scpm R: {:.3?}", rmv);
                 add_vecs(&rmv[..], &mut vmv[..], (size - 1) as i32, 1.0);
                 update_qmat(&mut q[..], &vmv[..], *action as usize, self.grid.actions.len()).unwrap();
             }
-            max_values(&mut xnew[..], &q[..], &mut pi[..], size - 1 , self.grid.actions.len());
+            max_values(&mut xnew[..], &q[..], &mut pi_new[..], size - 1 , self.grid.actions.len());
             copy(&xnew[..], &mut xtemp[..], size as i32);
             add_vecs(&x[..], &mut xnew[..], size as i32, -1.0);
-            epsilon = max_eps(&xnew[..]);
+            update_policy(&xnew, &eps, &mut pi[..], &pi_new[..], size - 1, &mut policy_stable);
+            //println!("updated policy: {:?}", pi);
+            //epsilon = max_eps(&xnew[..]);
             copy(&xtemp[..], &mut x[..], size as i32);
+            //println!("scpm x: {:?}", x);
         }
+
+        //println!("w: {:?}\nStable policy: {:?}", w, pi);
         
         // construct the matrices based on the policy
         let P = self.argmaxP(&pi[..], blas_transition_matrices);
         let R = self.argmaxR(&pi[..], blas_rewards_matrices);
 
         // get the objective values
-        epsilon = 1.;
+        let mut epsilon = 1.;
         let nobj_len = size * nobjs;
         while epsilon > *eps {
             for k in 0..nobjs {
@@ -371,6 +427,7 @@ impl SCPM {
         for k in 0..nobjs {
             r[k] = X[k * size]; // assumes that the initial state is 0
         }
+        //println!("r: {:?}", r);
         (pi, r)
     }
 
@@ -411,6 +468,27 @@ impl SCPM {
             for c in 0..nobjs {
                 R[c * (size-1) + r] = row.m[c * (size-1) + r];
             }
+        }
+        DenseMatrix {
+            m: R,
+            cols: size,
+            rows: size - 1
+        }
+    }
+
+    pub fn argmaxRv(
+        &self, 
+        pi: &[f64],
+        blas_rewards_matrices: &HashMap<i32, DenseMatrix>
+    ) -> DenseMatrix {
+        let size = self.grid.states.len();
+        let mut R: Vec<f64> = vec![0f64; size - 1];
+        for r in 0..size - 1 {
+            let action = pi[r] as i32;
+            let row = blas_rewards_matrices.get(&action).unwrap();
+            let state = self.grid.reverse_state_mapping.get(&r).unwrap();
+            let agent_idx = state.agent;
+            R[r] = row.m[agent_idx as usize * (size-1) + r];
         }
         DenseMatrix {
             m: R,
@@ -574,11 +652,16 @@ impl Grid {
         let mut result: HashMap<i32, DenseMatrix> = HashMap::new();
         //
         for action in self.actions.iter() {
-            let mut m: Vec<f64> = vec![0.; (size - 1) * nobjs];
+            let mut m: Vec<f64> = vec![f64::NEG_INFINITY; (size - 1) * nobjs];
             for state in self.states.iter().filter(|g| g.task != ntasks as i32) {
                 match rewards_fn.get(&(*state, *action)) {
                     Some(r) => {
+                        // the action is activated so you should get zero reward
+                        // for anything other then the agent task reward
                         let sidx = self.state_mapping.get(&state).unwrap();
+                        for a in 0..nagents + ntasks {
+                            m[a * (size - 1) + sidx] = 0.
+                        }
                         let cagent_idx = state.agent as usize;
                         let ctask_idx = nagents + state.task as usize;
                         m[cagent_idx * (size - 1) + sidx] = r[cagent_idx];
@@ -606,6 +689,18 @@ impl Grid {
             }
             None => { panic!("Reward mapping not found for state: {:.3?}", tmp_state)}
         }
+    }
+
+    pub fn rand_proper_policy(&self, num_tasks: usize) -> Vec<f64> {
+        let mut pi: Vec<f64> = vec![0.; self.states.len() - 1];
+        for state in self.states.iter().filter(|s| s.task != num_tasks as i32) {
+            let sidx = self.state_mapping.get(state).unwrap();
+            // choose one of the available actions
+            let avail_act = self.available_actions.get(state).unwrap();
+            let act = avail_act.choose(&mut rand::thread_rng()).unwrap();
+            pi[*sidx] = *act as f64;
+        }
+        pi
     }
 
     pub fn get_available_actions(&self) -> &HashMap<GridState, Vec<i32>> {

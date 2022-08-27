@@ -42,6 +42,15 @@ impl DFA {
             transitions: self.transitions.clone()
         }
     }
+
+    fn print_transitions(&self, words: Vec<String>) {
+        for q in self.states.iter() {
+            for w in words.iter() {
+                println!("q: {}, w: {} -> {:?}", 
+                    q, w, self.transitions.get(&(*q, w.to_string())));
+            }
+        }
+    }
 }
 
 #[pyclass]
