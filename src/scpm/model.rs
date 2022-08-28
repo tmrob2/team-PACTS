@@ -652,7 +652,7 @@ impl Grid {
         let mut result: HashMap<i32, DenseMatrix> = HashMap::new();
         //
         for action in self.actions.iter() {
-            let mut m: Vec<f64> = vec![f64::NEG_INFINITY; (size - 1) * nobjs];
+            let mut m: Vec<f64> = vec![-f32::MAX as f64; (size - 1) * nobjs];
             for state in self.states.iter().filter(|g| g.task != ntasks as i32) {
                 match rewards_fn.get(&(*state, *action)) {
                     Some(r) => {

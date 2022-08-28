@@ -320,25 +320,25 @@ fn new_target(
     weights: Vec<Vec<f64>>, 
     target: Vec<f64>,
     l: usize,
-    m: usize,
+    //m: usize,
     n: usize,
-    iteration: usize,
-    cstep: f64,
-    pstep: f64
+    //iteration: usize,
+    //cstep: f64,
+    //pstep: f64
 ) -> Result<Vec<f64>, Box<dyn std::error::Error>> {
     let new_target_script = include_str!("lp/pylp.py");
     let result: Vec<f64> = Python::with_gil(|py| -> PyResult<Vec<f64>> {
         let lpnewtarget = PyModule::from_code(py, new_target_script, "", "")?;
-        let lpnewtarget_result = lpnewtarget.getattr("new_target_")?.call1((
+        let lpnewtarget_result = lpnewtarget.getattr("eucl_new_target")?.call1((
             hullset,
             weights,
             target,
             l,
-            m,
+            //m,
             n,
-            iteration,
-            cstep,
-            pstep
+            //iteration,
+            //cstep,
+            //pstep
         ))?.extract()?;
         Ok(lpnewtarget_result)
     }).unwrap();
@@ -363,7 +363,9 @@ fn value_iteration_test(model: &MOProductMDP, w: Vec<f64>, nagents: usize, ntask
 #[pyo3(name="alloc_test")]
 fn test_alloc(model: &SCPM, w: Vec<f64>, eps: f64) {
     let prods = model.construct_products();
-    let (r, _prods, pis) = process_scpm(model, &w[..], &eps, model.agents.size, model.tasks.size, prods);
+    let (r, _prods, pis) = process_scpm(
+        model, &w[..], &eps, prods
+    );
     println!("r {:?}", r);
     println!("pis {:?}", pis);
 }

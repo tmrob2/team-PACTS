@@ -27,20 +27,20 @@ def hyperplane_solver(X, t, nobj):
     solution = [value(w[i]) for i in range(nobj)]
     return solution
 
-def new_target_(X, W, t, l, m, n, ii, cstep, pstep):
+def new_target_(X, W, t, l, m, n): #, ii, cstep, pstep):
     # n - num agents
     # m - num tasks
     # ii - iterations
     # cstep - cost step
     model = LpProblem("NoName", LpMinimize)
     solver = CPLEX_CMD(path=cplex_dir, msg=False)
-
+    print(n)
     lambda_ = {i: LpVariable(name=f"lambda{i}", lowBound=0, upBound=1.0) for i in range(l) }
-    z = {i: LpVariable(name=f"z{i}", upBound=upper_bound(t, ii, pstep, i, cstep, n)) for i in range(n + m)}
+    z = {i: LpVariable(name=f"z{i}", upBound=t[i]) for i in range(n + m)}
     epsilon = LpVariable(name="epsilon")
 
     for j in range(n+m):
-        model += lpSum([X[k][j] * lambda_[k] for k in range(l)]) - epsilon - z[j] <= 0
+        model += lpSum([X[k][j] * lambda_[k] for k in range(l)]) - epsilon <= z[j]
 
     for k in range(l):
         model += lpDot(W[k], z[k]) <= np.dot(W[k], X[k])
@@ -56,11 +56,35 @@ def new_target_(X, W, t, l, m, n, ii, cstep, pstep):
     #print(solution)
     return solution
 
-def upper_bound(t, ii, prob_step, j, cstep, n):
-    if j < n:
-        return t[j] - ii * cstep
-    else:
-        if t[j] - ii * prob_step:
-            return t[j] - ii * prob_step
-        else:
-            raise("target doesn't exist")
+#def upper_bound(t, ii, prob_step, j, cstep, n):
+#    if j < n:
+#        return t[j] - ii * cstep
+#    else:
+#        if t[j] - ii * prob_step:
+#            return t[j] - ii * prob_step
+#        else:
+#            raise("target doesn't exist")
+
+import cvxpy as cp
+
+def eucl_new_target(X, W, t, l, n):
+    
+    z = cp.Variable(len(t)) # vector variable with shape (5,)
+    #obj = cp.sum_squares(A @ z - t)
+    obj = cp.norm(z - t, 2)
+    constraints = [
+        z <= t,
+    ]
+    
+    for k in range(l):
+        constraints.append(np.dot(W[k], X[k]) >= W[k] @ z)
+
+    for i in range(n, len(t)):
+        constraints.append(z[i] >= max(t[i] - 0.01, 0.))
+    
+    prob = cp.Problem(cp.Minimize(obj), constraints)
+    prob.solve()
+    print("status", prob.status)
+    print("optimal value", prob.value)
+    print("optimial var", z.value)
+    return z.value

@@ -3,20 +3,21 @@ use crate::scpm::model::{SCPM, MOProductMDP, GridState};
 use crate::{Mantissa, blas_dot_product, val_or_zero_one, solver, new_target};
 //use pyo3::prelude::*;
 use crate::parallel::threaded::process_mdps;
+use std::time::Instant;
 
 //#[pyfunction]
 //#[pyo3(name="para_test")]
 pub fn process_scpm(
     model: &SCPM, 
     w: &[f64], 
-    eps: &f64, 
-    num_agents: usize,
-    num_tasks: usize,
+    eps: &f64,
     prods: Vec<MOProductMDP>
 ) -> (Vec<f64>, Vec<MOProductMDP>, HashMap<(i32, i32), Vec<f64>>) {
     // Algorithm 1 will need to follow this format
     // where we move the ownership of the product models into a function 
     // which processes them and then return those models again for reprocessing
+    let num_agents = model.agents.size;
+    let num_tasks = model.tasks.size;
     let (prods, mut pis, result) = process_mdps(prods, &w[..], &eps, num_agents, num_tasks).unwrap();
     //println!("result: {:?}", result);
     // compute a rewards model
@@ -88,7 +89,9 @@ pub fn alloc_dfs(model: &SCPM, policy: Vec<f64>) -> Vec<GridState> {
 
 pub fn scheduler_synthesis(model: &SCPM, w: &[f64], eps: &f64, t: &[f64], prods_: Vec<MOProductMDP>) 
 -> (Vec<HashMap<(i32, i32), Vec<f64>>>, HashMap<usize, Vec<f64>>, Vec<f64>) {
-    println!("initial w: {:.3?}", w);
+    let t1 = Instant::now();
+    //let torig = t.to_vec();
+    //println!("initial w: {:.3?}", w);
     let mut tnew = t.to_vec();
     let mut hullset: HashMap<usize, Vec<f64>> = HashMap::new();
     let mut hullset_X: Vec<Vec<f64>> = Vec::new();
@@ -99,17 +102,18 @@ pub fn scheduler_synthesis(model: &SCPM, w: &[f64], eps: &f64, t: &[f64], prods_
     let mut X: HashSet<Vec<Mantissa>> = HashSet::new();
     let mut W: HashSet<Vec<Mantissa>> = HashSet::new();
     let mut schedulers: Vec<HashMap<(i32, i32), Vec<f64>>> = Vec::new();
-    let num_agents = model.agents.size;
-    let num_tasks = model.tasks.size;
+    //let num_agents = model.agents.size;
+    //let num_tasks = model.tasks.size;
     let mut prods = prods_;
     // set an initial weight
-    let mut w = vec![0.; num_agents];
-    let mut w2 = vec![1. / num_tasks as f64; num_tasks];
-    w.append(&mut w2);
+    //let mut w = vec![0.; num_agents];
+    //let mut w2 = vec![1. / num_tasks as f64; num_tasks];
+    //w.append(&mut w2);
 
     // compute the initial point for the random weight vector
+    println!("Num agents: {}, Num tasks: {}", model.agents.size, model.tasks.size);
     let (r, prods_, pis) = process_scpm(
-        model, &w[..], &eps, num_agents, t.len(), prods 
+        model, &w[..], &eps, prods 
     );
 
     // every single sheduler has been returned at this point, but we only need those which 
@@ -119,7 +123,7 @@ pub fn scheduler_synthesis(model: &SCPM, w: &[f64], eps: &f64, t: &[f64], prods_
 
     X.insert(r.iter().cloned().map(|f| Mantissa::new(f)).collect::<Vec<Mantissa>>());
     W.insert(w.iter().cloned().map(|f| Mantissa::new(f)).collect::<Vec<Mantissa>>());
-    println!("r init: {:.3?}", r);
+    //println!("r init: {:.3?}", r);
     let wrl = blas_dot_product(&r[..], &w[..]);
     let wt = blas_dot_product(&tnew[..], &w[..]);
     println!("wt: {:.3?}, wrl: {:.3?}, wrl < wt: {}", wt, wrl, wrl < wt);
@@ -128,32 +132,26 @@ pub fn scheduler_synthesis(model: &SCPM, w: &[f64], eps: &f64, t: &[f64], prods_
         temp_hullset_X.insert(0, r.to_vec());
         temp_weights_ = weights_v.clone();
         temp_weights_.insert(0, w.to_vec());
-        let mut tnew_found = false;
-        let mut iterations = 1;
-        while !tnew_found {
-            let tnew_result = new_target(
-                temp_hullset_X.to_vec(), 
-                temp_weights_.to_vec(), 
-                tnew.to_vec(), 
-                1, 
-                model.tasks.size,
-                model.agents.size,
-                iterations,
-                5.,
-                0.01
-            );
-            match tnew_result {
-                Ok(x) => {
-                    println!("tnew: {:.3?}", x);
-                    tnew = x;
-                    tnew_found = true;
-                    //return (schedulers, hullset, x)
-                }
-                Err(_) => {
-                    iterations += 1;
-                }
+        let tnew_ = new_target(
+            temp_hullset_X, 
+            temp_weights_, 
+            tnew.to_vec(), 
+            1, 
+            //model.tasks.size,
+            model.agents.size, 
+        );
+        match tnew_ {
+            Ok(x) => {
+                println!("tnew: {:?}", x);
+                tnew = x;
+                //return (schedulers, hullset, x)
+            }
+            Err(_) => {
+                panic!("ahhh!");
             }
         }
+        // repeat 
+
     }
 
     hullset.insert(0, r.to_vec());
@@ -167,18 +165,16 @@ pub fn scheduler_synthesis(model: &SCPM, w: &[f64], eps: &f64, t: &[f64], prods_
     let mut w: Vec<f64> = vec![0.; tot_objs];
     prods = prods_;
     let mut count: usize = 1;
-
-    
     
     while lpvalid {
         
         let lpresult = solver(hullset_X.to_vec(), tnew.to_vec(), tot_objs);
-        //println!("LP result: {:?}", lpresult);
+        //println!("LP result: {:.2?}", lpresult);
         match lpresult {
             Ok(sol) => {
                 for (ix, val) in sol.iter().enumerate() {
                     if ix < tot_objs {
-                        println!(" w[{:?}] = {:.3}", ix, val);
+                        //println!(" w[{:?}] = {:.3}", ix, val);
                         w[ix] = val_or_zero_one(val);
                     }
                 }
@@ -194,44 +190,35 @@ pub fn scheduler_synthesis(model: &SCPM, w: &[f64], eps: &f64, t: &[f64], prods_
                     }
                     false => { 
                         let (r, prods_, pis) = process_scpm(
-                            model, &w[..], &eps, num_agents, t.len(), prods
+                            model, &w[..], &eps, prods
                         );
                         //println!("pis {:?}", pis);
-                        println!("r new: {:.2?}", r);
+                        //println!("r new: {:.2?}", r);
                         prods = prods_;
                         let wrl = blas_dot_product(&r[..], &w[..]);
                         let wt = blas_dot_product(&tnew[..], &w[..]);
-
                         println!("wt: {:.3?}, wrl: {:.3?}, wrl < wt: {}", wt, wrl, wrl < wt);
                         if wrl < wt {
                             temp_hullset_X = hullset_X.clone();
                             temp_hullset_X.insert(0, r.to_vec());
                             temp_weights_ = weights_v.clone();
                             temp_weights_.insert(0, w.to_vec());
-                            let mut tnew_found = false;
-                            let mut iterations = 1;
-                            while !tnew_found {
-                                let tnew_result = new_target(
-                                    temp_hullset_X.to_vec(), 
-                                    temp_weights_.to_vec(), 
-                                    tnew.to_vec(), 
-                                    1, 
-                                    model.tasks.size,
-                                    model.agents.size,
-                                    iterations,
-                                    5.,
-                                    0.01
-                                );
-                                match tnew_result {
-                                    Ok(x) => {
-                                        println!("tnew: {:?}", x);
-                                        tnew = x;
-                                        tnew_found = true;
-                                        //return (schedulers, hullset, x)
-                                    }
-                                    Err(_) => {
-                                        iterations += 1;
-                                    }
+                            let tnew_ = new_target(
+                                temp_hullset_X, 
+                                temp_weights_, 
+                                tnew.to_vec(), 
+                                hullset_X.len(), 
+                                //model.tasks.size,
+                                model.agents.size, 
+                            );
+                            match tnew_ {
+                                Ok(x) => {
+                                    println!("tnew: {:.3?}", x);
+                                    tnew = x;
+                                    //return (schedulers, hullset, x)
+                                }
+                                Err(_) => {
+                                    panic!("A solution to the convex optimisation could not be found!");
                                 }
                             }
                         } else {
@@ -253,5 +240,24 @@ pub fn scheduler_synthesis(model: &SCPM, w: &[f64], eps: &f64, t: &[f64], prods_
             }
         }
     }
+    println!("Time: {:.3}", t1.elapsed().as_secs_f32());
     (schedulers, hullset, tnew)
+}
+
+fn z_star(X: &[Vec<f64>], tnew: Vec<f64>) {
+    let mut vals: Vec<f64> = vec![0.; X.len()];
+    assert_ne!(X.len(), 0);
+    for (k, x) in X.iter().enumerate() {
+        vals[k] = l2norm(&x[..], &tnew[..]);
+    }
+    //vals.iter().enumerate().fold(f64::NEG_INFINITY, |k, val| f64::max)
+}
+
+fn l2norm(x: &[f64], y: &[f64]) -> f64 {
+    let mut z: Vec<f64> = vec![0.; x.len()];
+    for k in 0..z.len() {
+        z[k] = (x[k] - y[k]).powf(2.);
+    }
+    let zsum: f64 = z.iter().sum();
+    zsum.sqrt()
 }

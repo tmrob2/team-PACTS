@@ -2,7 +2,7 @@ import ce
 import random
 
 NUM_AGENTS = 2
-NUM_TASKS = 4
+NUM_TASKS = 30
 
 
 seed = 1234
@@ -37,11 +37,13 @@ def rewards_mdp(agent, r):
 team = ce.Team()
 for i in range(0, NUM_AGENTS):
     agent = ce.Agent(0, list(range(5)), [0, 1])
-    if i == 1:
-        agent = transition_map(agent, seed, 0.007, 0.001)
+    #else:
+    if i == 0:
+        agent = transition_map(agent, 42, 0.011, 0.001)
+        agent = rewards_mdp(agent, 1)
     else:
-        agent = transition_map(agent, seed, 0.01, 0.001)
-    agent = rewards_mdp(agent, 1)
+        agent = transition_map(agent, 123, 0.009, 0.001)
+        agent = rewards_mdp(agent, 1)
     team.add_agent(agent.clone())
 
 def construct_message_sending_task(r):
@@ -82,11 +84,11 @@ if __name__ == "__main__":
     #product_mdp.print_rewards()
     
     scpm = ce.SCPM(team, mission)
-    w = [0] * NUM_AGENTS + [1 / NUM_TASKS] * NUM_TASKS
+    #w = [0] * NUM_AGENTS + [1 / NUM_TASKS] * NUM_TASKS
     #ce.vi_test(product_mdp, w, NUM_AGENTS, NUM_TASKS)
-    #w = [1 / (NUM_AGENTS + NUM_TASKS)] * ( NUM_AGENTS + NUM_TASKS )
+    w = [1 / (NUM_AGENTS + NUM_TASKS)] * ( NUM_AGENTS + NUM_TASKS )
     #w = [0, 0, 0.5, 0.5]
     #scpm.print_transitions()
-    target = [-20., -20., 0.99, 0.97, 0.95, 0.95]
+    target = [-35] * NUM_AGENTS + [0.8] * NUM_TASKS 
     ce.scheduler_synthesis(scpm, w, 0.0001, target)
     #ce.alloc_test(scpm, w, 0.0001)

@@ -11,11 +11,12 @@ use float_eq::float_eq;
 pub fn value_iteration(prod: &MOProductMDP, w: &[f64], eps: &f64, nagents: usize, ntasks:usize) 
     -> (Vec<f64>, Vec<f64>) {
     
-    println!("Agent: {}, Task: {}", prod.agent_id, prod.task_id);
+    //println!("Agent: {}, Task: {}", prod.agent_id, prod.task_id);
     let size = prod.states.len();
     let nobjs: usize = nagents + ntasks;
     // we will need to construct a set of size x size 
     // transition matrices for each action
+    //println!("nobjs: {}", nobjs);
     let P = construct_spblas_matrices(prod);
     let R = construct_rewards_matrices(prod, nagents, nobjs);
 
@@ -31,6 +32,7 @@ pub fn value_iteration(prod: &MOProductMDP, w: &[f64], eps: &f64, nagents: usize
     // Determine the value of the initial vector
     let argmaxP = construct_argmax_spPmatrix(prod, &pi[..]);
     let mut argmaxR = construct_argmax_Rvector(prod, &pi[..]);
+
 
     let mut X: Vec<f64> = vec![0.; size * 2];
     let mut Xnew: Vec<f64> = vec![0.; size * 2];
@@ -69,9 +71,10 @@ pub fn value_iteration(prod: &MOProductMDP, w: &[f64], eps: &f64, nagents: usize
                 Ra.cols as i32,
                 &mut rmv[..]
             );
-            //println!("rmv after weighting: {:?}", rmv);
+            //println!("rmv after weighting: {:.2?}", rmv);
             assert_eq!(vmv.len(), rmv.len());
             // Perform the operation R.w + P.x
+            //println!("vmv  {:.2?}", vmv);
             add_vecs(&rmv[..], &mut vmv[..], S.nr as i32, 1.0);
             // Add the value vector to the Q table
             update_qmat(&mut q[..], &vmv[..], ii, prod.actions.len() as usize).unwrap();
@@ -262,7 +265,7 @@ fn construct_rewards_matrices(prod: &MOProductMDP, nagents: usize, nobjs: usize)
     let agent_idx: usize = prod.agent_id as usize;
     let task_idx: usize = nagents + prod.task_id as usize;
     for action in prod.actions.iter() {
-        let mut R: Vec<f64> = vec![f64::NEG_INFINITY; size * nobjs];
+        let mut R: Vec<f64> = vec![-f32::MAX as f64; size * nobjs];
         for state in prod.states.iter() {
             let row_idx = prod.get_state_map().get(state).unwrap();
             match prod.rewards.get(&(*state, *action)) {
