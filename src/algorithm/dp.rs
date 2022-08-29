@@ -19,6 +19,7 @@ pub fn value_iteration(prod: &MOProductMDP, w: &[f64], eps: &f64, nagents: usize
     //println!("nobjs: {}", nobjs);
     let P = construct_spblas_matrices(prod);
     let R = construct_rewards_matrices(prod, nagents, nobjs);
+    print_matrix(sparse_to_cs(&mut P.get(&0).unwrap()));
 
     //print_rewards_matrices(&R, prod.get_reverse_state_map(), &prod.actions[..], prod.agent_id, prod.task_id);
 

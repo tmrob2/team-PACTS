@@ -2,7 +2,7 @@ import ce
 import random
 
 NUM_AGENTS = 2
-NUM_TASKS = 30
+NUM_TASKS = 2
 
 
 seed = 1234
@@ -76,19 +76,19 @@ for k in range(0, NUM_TASKS):
 
 if __name__ == "__main__":
     #print(f"Rust calc sum: (5, 20) = {ce.sum_as_string(5, 20)}")
-    #initial_state = (0, 0)
+    initial_state = (0, 0)
     # test creating the product mdp
     #print("Testing task 0")
-    #product_mdp = ce.build_model(initial_state, agent, mission.get_task(3), 0, 3)
+    product_mdp = ce.build_model(initial_state, agent, mission.get_task(0), 0, 0)
     #product_mdp.print_transitions()
     #product_mdp.print_rewards()
     
     scpm = ce.SCPM(team, mission)
-    #w = [0] * NUM_AGENTS + [1 / NUM_TASKS] * NUM_TASKS
-    #ce.vi_test(product_mdp, w, NUM_AGENTS, NUM_TASKS)
-    w = [1 / (NUM_AGENTS + NUM_TASKS)] * ( NUM_AGENTS + NUM_TASKS )
+    w = [0] * NUM_AGENTS + [1 / NUM_TASKS] * NUM_TASKS
+    ce.vi_test(product_mdp, w, NUM_AGENTS, NUM_TASKS)
+    #w = [1 / (NUM_AGENTS + NUM_TASKS)] * ( NUM_AGENTS + NUM_TASKS )
     #w = [0, 0, 0.5, 0.5]
     #scpm.print_transitions()
-    target = [-35] * NUM_AGENTS + [0.8] * NUM_TASKS 
-    ce.scheduler_synthesis(scpm, w, 0.0001, target)
+    #target = [-35] * NUM_AGENTS + [0.8] * NUM_TASKS 
+    #ce.scheduler_synthesis(scpm, w, 0.0001, target)
     #ce.alloc_test(scpm, w, 0.0001)
