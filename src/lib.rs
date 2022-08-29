@@ -62,7 +62,7 @@ impl DenseMatrix {
 }
 
 #[derive(Debug)]
-pub struct COO {
+pub struct Triple {
     pub nzmax: i32,
     pub nr: i32,
     pub nc: i32,
@@ -70,6 +70,39 @@ pub struct COO {
     pub j: Vec<i32>,
     pub x: Vec<f64>,
     pub nz: i32,
+}
+
+impl Triple {
+    pub fn new() -> Self {
+        Triple {
+            nzmax: 0,
+            nr: 0,
+            nc: 0,
+            i: Vec::new(),
+            j: Vec::new(),
+            x: Vec::new(),
+            nz: 0
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct SparseMatrixComponents {
+    pub i: Vec<i32>, // row indices per column
+    pub p: Vec<i32>, // column ranges
+    pub x: Vec<f64>  // values per column row indices
+}
+
+pub fn deconstruct(A: *mut cs_di, nnz: usize, cols: usize) -> SparseMatrixComponents {
+    let x: Vec<f64>;
+    let p: Vec<i32>;
+    let i: Vec<i32>;
+    unsafe {
+        x = Vec::from_raw_parts((*A).x as *mut f64, nnz, nnz);
+        i = Vec::from_raw_parts((*A).i as *mut i32, nnz, nnz);
+        p = Vec::from_raw_parts((*A).p as *mut i32, cols + 1, cols + 1);
+    }
+    SparseMatrixComponents {i, p, x}
 }
 
 pub fn construct_blas_matrix(
@@ -115,7 +148,7 @@ pub fn create_sparse_matrix(m: i32, n: i32, rows: &[i32], cols: &[i32], x: &[f64
 
 /// Converts a Sparse struct representing a matrix into a C struct for CSS Sparse matrix
 /// the C struct doesn't really exist, it is a mutable pointer reference to the Sparse struct
-pub fn sparse_to_cs(sparse: &COO) -> *mut cs_di {
+pub fn sparse_to_cs(sparse: &Triple) -> *mut cs_di {
     let T = create_sparse_matrix(
         sparse.nr,
         sparse.nc,

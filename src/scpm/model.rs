@@ -1,3 +1,5 @@
+#![allow(non_snake_case)]
+
 use hashbrown::{HashMap, HashSet};
 use pyo3::prelude::*;
 use crate::agent::agent::{Agent, Team};
@@ -13,8 +15,10 @@ pub struct MOProductMDP {
     pub initial_state: (i32, i32),
     pub states: Vec<(i32, i32)>,
     pub actions: Vec<i32>,
-    pub rewards: HashMap<((i32, i32), i32), Vec<f64>>,
-    pub transitions: HashMap<((i32, i32), i32), Vec<((i32, i32), f64)>>,
+    //pub rewards: HashMap<((i32, i32), i32), Vec<f64>>,
+    //pub transitions: HashMap<((i32, i32), i32), Vec<((i32, i32), f64)>>,
+    pub transition_mat: HashMap<i32, Triple>,
+    pub rewards_mat: HashMap<i32, DenseMatrix>,
     pub agent_id: i32,
     pub task_id: i32,
     action_map: HashMap<(i32, i32), Vec<i32>>,
@@ -25,40 +29,29 @@ pub struct MOProductMDP {
 #[pymethods]
 impl MOProductMDP {
     pub fn print_transitions(&self) {
-        for state in self.states.iter() {
-            for action in self.actions.iter() {
-                match self.transitions.get(&(*state, *action)) {
-                    Some(v) => {
-                        println!("[{:?}, {}] => [{:?}]", state, action, v);
-                    }
-                    None => { }
-                }
-            }
-        }
+        // todo convert matrix to cs_di and print
     }
 
     pub fn print_rewards(&self) {
-        for state in self.states.iter() {
-            for action in self.actions.iter() {
-                match self.rewards.get(&(*state, *action)) {
-                    Some(r) => { 
-                        println!("[{:?}, {}] => {:?}", state, action, r);
-                    }
-                    None => { }
-                }
-            }
-        }
+        // todo convert matrix to cs_di and print
     }
 }
 
 impl MOProductMDP {
     pub fn new(initial_state: (i32, i32), actions: &[i32], agent_id: i32, task_id: i32) -> Self {
+        let mut transitions: HashMap<i32, Triple> = HashMap::new();
+        let mut rewards: HashMap<i32, DenseMatrix> = HashMap::new();
+        for action in actions.iter() {
+            transitions.insert(*action, Triple::new());
+            rewards.insert(*action, DenseMatrix::new(0,0));
+        }
+        
         MOProductMDP {
             initial_state,
             states: Vec::new(),
             actions: actions.to_vec(),
-            rewards: HashMap::new(),
-            transitions: HashMap::new(),
+            rewards_mat: rewards,
+            transition_mat: transitions,
             agent_id,
             task_id,
             action_map: HashMap::new(),
@@ -108,35 +101,57 @@ impl MOProductMDP {
         }
     }
 
-    fn insert_transition(&mut self, sprime: ((i32, i32), f64), state: (i32, i32), action: i32) {
-        match self.transitions.get_mut(&(state, action)) {
-            Some(t) => {
-                t.push(sprime);
-            }
-            None => {
-                self.transitions.insert((state, action), vec![sprime]);
-            }
-        }
+    fn insert_transition(&mut self, state: usize, action: i32, sprime: usize, p: f64) {
+        let P: &mut Triple = self.transition_mat.get_mut(&action).unwrap();
+        // we know that this doesn't exist because we have guarded against it
+        P.i.push(state as i32);
+        P.j.push(sprime as i32);
+        P.x.push(p);
     }
 
-    fn insert_reward(&mut self, state: (i32, i32), mdp: &Agent, task: &DFA, action: i32) {
-        let mut rewards = vec![0.; 2];
-        let agent_reward = match mdp.rewards.get(&(state.0, action)) {
-            Some(r) => { *r }
-            None => { panic!("Could not find reward for state: {:?}, action: {}", state, action) }
-        };
-        if task.accepting.contains(&state.1) 
-            || task.done.contains(&state.1)
-            || task.rejecting.contains(&state.1) {
-            rewards[0] = 0.
-        } else {
-            rewards[0] = agent_reward;
+    fn insert_reward(
+        &mut self, 
+        sidx: usize, 
+        action: i32, 
+        rewards: Vec<f64>,
+        nobjs: usize,
+        size: usize
+    ) {
+        let R: &mut DenseMatrix = self.rewards_mat.get_mut(&action).unwrap();
+        for c in 0..nobjs {
+            R.m[c * size + sidx] = rewards[c];
         }
-        if task.accepting.contains(&state.1) {
-            rewards[1] = 1.;
-        }
-        self.rewards.insert((state, action), rewards);
     }
+}
+
+fn process_mo_reward(
+    rewards_map: &mut HashMap<(i32, usize), Vec<f64>>,
+    s: i32,
+    q: i32,
+    sidx: usize,
+    mdp: &Agent,
+    task: &DFA,
+    action: i32,
+    nobjs: usize,
+    agent_idx: usize,
+    task_idx: usize
+) {
+    let mut rewards = vec![0.; nobjs];
+    let agent_reward = match mdp.rewards.get(&(s, action)) {
+        Some(r) => { *r }
+        None => { panic!("Could not find reward for state: {:?}, action: {}", (s, q), action) }
+    };
+    if task.accepting.contains(&q) 
+        || task.done.contains(&q)
+        || task.rejecting.contains(&q) {
+        rewards[agent_idx] = 0.
+    } else {
+        rewards[agent_idx] = agent_reward;
+    }
+    if task.accepting.contains(&q) {
+        rewards[task_idx] = 1.;
+    }
+    rewards_map.insert((action, sidx), rewards);
 }
 
 #[pyfunction]
@@ -145,10 +160,12 @@ pub fn build_model(
     agent: &Agent,
     task: &DFA,
     agent_id: i32,
-    task_id: i32
+    task_id: i32,
+    nagents: usize,
+    nobjs: usize
 ) -> MOProductMDP {
     let mdp: MOProductMDP = product_mdp_bfs(
-        &initial_state, agent, task, agent_id, task_id
+        &initial_state, agent, task, agent_id, task_id, nagents, nobjs
     );
     mdp
 }
@@ -158,9 +175,13 @@ fn product_mdp_bfs(
     mdp: &Agent,
     task: &DFA,
     agent_id: i32, 
-    task_id: i32 
+    task_id: i32,
+    nagents: usize,
+    nobjs: usize,
 ) -> MOProductMDP {
     let mut visited: HashSet<(i32, i32)> = HashSet::new();
+    let mut transitions: HashMap<(i32, usize, usize), f64> = HashMap::new();
+    let mut rewards: HashMap<(i32, usize), Vec<f64>> = HashMap::new();
     let mut stack: VecDeque<(i32, i32)> = VecDeque::new();
     let mut product_mdp: MOProductMDP = MOProductMDP::new(
         *initial_state, &mdp.actions[..], agent_id, task_id
@@ -171,9 +192,11 @@ fn product_mdp_bfs(
     visited.insert(*initial_state);
     product_mdp.insert_state(*initial_state);
 
+
     while !stack.is_empty(){
         // pop the front of the stack
         let (s, q) = stack.pop_front().unwrap();
+        let sidx = *product_mdp.state_map.get(&(s, q)).unwrap();
         // for the new state
         // 1. has the new state already been visited
         // 2. If the new stat has not been visited then insert 
@@ -182,18 +205,47 @@ fn product_mdp_bfs(
             product_mdp.insert_action(*action);
             product_mdp.insert_avail_act(&(s, q), *action);
             // insert the mdp rewards
-            product_mdp.insert_reward((s, q), mdp, task, *action);
+            let task_idx: usize = nagents + task_id as usize;
+            process_mo_reward(
+                &mut rewards, s, q, sidx, mdp, task, *action, nobjs, agent_id as usize, task_idx
+            );
             for (sprime, p, w) in mdp.transitions.get(&(s, *action)).unwrap().iter() {
+                // add sprime to state map if it doesn't already exist
                 let qprime: i32 = task.get_transitions(q, w.to_string());
                 if !visited.contains(&(*sprime, qprime)) {
                     visited.insert((*sprime, qprime));
                     stack.push_back((*sprime, qprime));
                     product_mdp.insert_state((*sprime, qprime));
                 }
-                product_mdp.insert_transition(((*sprime, qprime), *p), (s, q), *action);
+                let sprime_idx = *product_mdp.state_map.get(&(*sprime, qprime)).unwrap();
+                transitions.insert((*action, sidx, sprime_idx), *p);
             }
         }
-        
+    }
+
+    // once the BFS is finished then we can convert the HashMaps transitions and rewards into
+    // there corresponding matrices
+    for ((action, sidx, sprime_idx), p) in transitions.drain() {
+        product_mdp.insert_transition(sidx, action, sprime_idx, p);
+    }
+
+    
+    for action in product_mdp.actions.iter() {
+        let size = product_mdp.states.len() as i32;
+        let P: &mut Triple = product_mdp.transition_mat.get_mut(action).unwrap();
+        P.nc = size;
+        P.nr = size;
+        P.nzmax = P.x.len() as i32;
+        P.nz = P.x.len() as i32;
+        let R: &mut DenseMatrix = product_mdp.rewards_mat.get_mut(action).unwrap();
+        R.m = vec![-f32::MAX as f64; size as usize * nobjs];
+        R.cols = nobjs;
+        R.rows = size as usize;
+    }
+    // the next three lines of code must come after sizing of the matrices above because we
+    // need to initialise the dense matrix to -inf before we can start inserting values into it
+    for ((action, sidx), r) in rewards.drain() {
+        product_mdp.insert_reward(sidx, action, r, nobjs, product_mdp.states.len());
     }
     product_mdp.reverse_state_map = reverse_key_value_pairs(&product_mdp.state_map);
     product_mdp
@@ -243,9 +295,11 @@ impl SCPM {
     pub fn construct_products(&self) -> Vec<MOProductMDP> {
         let mut output: Vec<MOProductMDP> = Vec::new();
         let initial_state: (i32, i32) = (0, 0);
+        let nobjs = self.agents.size + self.tasks.size;
+        let nagents = self.agents.size;
         for (i, agent) in self.agents.agents.iter().enumerate() {
             for (j, task) in self.tasks.tasks.iter().enumerate() {
-                output.push(build_model(initial_state, agent, task, i as i32, j as i32));
+                output.push(build_model(initial_state, agent, task, i as i32, j as i32, nagents, nobjs));
             }
         }
         output
