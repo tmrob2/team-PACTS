@@ -126,6 +126,7 @@ impl MOProductMDP {
 
 fn process_mo_reward(
     rewards_map: &mut HashMap<(i32, usize), Vec<f64>>,
+    mdp_rewards: &HashMap<(i32, i32), f64>,
     s: i32,
     q: i32,
     sidx: usize,
@@ -137,7 +138,7 @@ fn process_mo_reward(
     task_idx: usize
 ) {
     let mut rewards = vec![0.; nobjs];
-    let agent_reward = match mdp.rewards.get(&(s, action)) {
+    let agent_reward = match mdp_rewards.get(&(s, action)) {
         Some(r) => { *r }
         None => { panic!("Could not find reward for state: {:?}, action: {}", (s, q), action) }
     };
@@ -154,10 +155,12 @@ fn process_mo_reward(
     rewards_map.insert((action, sidx), rewards);
 }
 
-#[pyfunction]
 pub fn build_model(
     initial_state: (i32, i32),
     agent: &Agent,
+    mdp_rewards: &HashMap<(i32, i32), f64>,
+    mdp_transitions: &HashMap<(i32, i32), Vec<(i32, f64, String)>>,
+    mdp_available_actions: &HashMap<i32, Vec<i32>>,
     task: &DFA,
     agent_id: i32,
     task_id: i32,
@@ -165,7 +168,16 @@ pub fn build_model(
     nobjs: usize
 ) -> MOProductMDP {
     let mdp: MOProductMDP = product_mdp_bfs(
-        &initial_state, agent, task, agent_id, task_id, nagents, nobjs
+        &initial_state, 
+        agent, 
+        mdp_rewards,
+        mdp_transitions,
+        mdp_available_actions,
+        task, 
+        agent_id, 
+        task_id, 
+        nagents, 
+        nobjs
     );
     mdp
 }
@@ -173,11 +185,14 @@ pub fn build_model(
 fn product_mdp_bfs(
     initial_state: &(i32, i32),
     mdp: &Agent,
+    mdp_rewards: &HashMap<(i32, i32), f64>,
+    mdp_transitions: &HashMap<(i32, i32), Vec<(i32, f64, String)>>,
+    mdp_available_actions: &HashMap<i32, Vec<i32>>,
     task: &DFA,
     agent_id: i32, 
     task_id: i32,
     nagents: usize,
-    nobjs: usize,
+    nobjs: usize
 ) -> MOProductMDP {
     let mut visited: HashSet<(i32, i32)> = HashSet::new();
     let mut transitions: HashMap<(i32, usize, usize), f64> = HashMap::new();
@@ -186,6 +201,8 @@ fn product_mdp_bfs(
     let mut product_mdp: MOProductMDP = MOProductMDP::new(
         *initial_state, &mdp.actions[..], agent_id, task_id
     );
+
+    let dfa_transitions = task.construct_transition_hashmap();
 
     // input the initial state into the back of the stack
     stack.push_back(*initial_state);
@@ -201,17 +218,17 @@ fn product_mdp_bfs(
         // 1. has the new state already been visited
         // 2. If the new stat has not been visited then insert 
         // its successors into the stack
-        for action in mdp.available_actions.get(&s).unwrap() {
+        for action in mdp_available_actions.get(&s).unwrap() {
             product_mdp.insert_action(*action);
             product_mdp.insert_avail_act(&(s, q), *action);
             // insert the mdp rewards
             let task_idx: usize = nagents + task_id as usize;
             process_mo_reward(
-                &mut rewards, s, q, sidx, mdp, task, *action, nobjs, agent_id as usize, task_idx
+                &mut rewards, mdp_rewards, s, q, sidx, mdp, task, *action, nobjs, agent_id as usize, task_idx
             );
-            for (sprime, p, w) in mdp.transitions.get(&(s, *action)).unwrap().iter() {
+            for (sprime, p, w) in mdp_transitions.get(&(s, *action)).unwrap().iter() {
                 // add sprime to state map if it doesn't already exist
-                let qprime: i32 = task.get_transitions(q, w.to_string());
+                let qprime: i32 = *dfa_transitions.get(&(q, w.to_string())).unwrap();
                 if !visited.contains(&(*sprime, qprime)) {
                     visited.insert((*sprime, qprime));
                     stack.push_back((*sprime, qprime));
@@ -298,8 +315,22 @@ impl SCPM {
         let nobjs = self.agents.size + self.tasks.size;
         let nagents = self.agents.size;
         for (i, agent) in self.agents.agents.iter().enumerate() {
+            let mdp_rewards = agent.convert_rewards_to_map();
+            let mdp_transitions = agent.convert_transitions_to_map();
+            let mdp_available_actions = agent.available_actions_to_map();
             for (j, task) in self.tasks.tasks.iter().enumerate() {
-                output.push(build_model(initial_state, agent, task, i as i32, j as i32, nagents, nobjs));
+                output.push(build_model(
+                    initial_state, 
+                    agent, 
+                    &mdp_rewards,
+                    &mdp_transitions,
+                    &mdp_available_actions,
+                    task, 
+                    i as i32, 
+                    j as i32, 
+                    nagents, 
+                    nobjs
+                ));
             }
         }
         output

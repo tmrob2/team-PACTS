@@ -4,15 +4,12 @@ use crate::*;
 use hashbrown::HashMap;
 use rand::seq::SliceRandom;
 use float_eq::float_eq;
-use std::time::Instant;
 
 /// Given a Product MDP, and a weight vector perform a multi-objective 
 /// value-policy iteration to generate a simple scheduler which is an optimal 
 /// solution to this problem
 pub fn value_iteration(prod: &MOProductMDP, w: &[f64], eps: &f64, nagents: usize, ntasks:usize) 
     -> (Vec<f64>, Vec<f64>) {
-    let tsparse_creation = Instant::now();
-    //println!("Agent: {}, Task: {}", prod.agent_id, prod.task_id);
     let size = prod.states.len();
     let nobjs: usize = nagents + ntasks;
     // convert the matrices to cs_di fmt
@@ -20,7 +17,6 @@ pub fn value_iteration(prod: &MOProductMDP, w: &[f64], eps: &f64, nagents: usize
     for action in prod.actions.iter() {
         let TP = prod.transition_mat.get(action).unwrap();
         let A = sparse_to_cs(TP);
-        print_matrix(A);
         P.insert(*action, SparseMatrix {
             m: A,
             nr: TP.nr as usize,
@@ -28,9 +24,6 @@ pub fn value_iteration(prod: &MOProductMDP, w: &[f64], eps: &f64, nagents: usize
             nnz: TP.nz as usize
         });
     }
-    println!("Sparse matrix conversion to *mut cs_di: {:?}", tsparse_creation.elapsed().as_secs_f32());
-    let t2 = Instant::now();
-    print_rewards_matrices(&prod.rewards_mat, prod.get_reverse_state_map(), &prod.actions[..], prod.agent_id, prod.task_id);
 
     let mut x = vec![0f64; size]; // value vector for agent-task pair
     let mut xnew = vec![0f64; size]; // new value vector for agent-task pair
@@ -38,15 +31,10 @@ pub fn value_iteration(prod: &MOProductMDP, w: &[f64], eps: &f64, nagents: usize
 
     // initialise a random policy and compute its expected value
     let mut pi = random_policy(prod);
-    println!("init random policy: {:?}", pi);
 
     // Determine the value of the initial vector
-    let argmaxP = construct_argmax_spmatrix(prod, &pi[..], &P, size, size);
+    let argmaxP = construct_argmax_spmatrix(prod, &pi[..], &P, size);
     let argmaxR = construct_argmax_Rvector(prod, &pi[..]);
-    println!("Time to create argmax matrices: {:?}", t2.elapsed().as_secs_f32());
-    let t2 = Instant::now();
-
-    println!("argmax R init: {:?}", argmaxR);
 
     let mut X: Vec<f64> = vec![0.; size * 2];
     let mut Xnew: Vec<f64> = vec![0.; size * 2];
@@ -58,132 +46,118 @@ pub fn value_iteration(prod: &MOProductMDP, w: &[f64], eps: &f64, nagents: usize
     let mut unstable_count: i32 = 0;
 
     value_for_init_policy(&argmaxR[..], &mut x[..], eps, &argmaxP);
-    println!("Time to compute init policy value: {:?}", t2.elapsed().as_secs_f32());
-    println!("Value for init policy: \n{:?}", x);
 
+    let mut pi_new: Vec<f64> = vec![-1.0; size];
+    let mut q = vec![0f64; size * prod.actions.len()];
+    let mut epsilon: f64; // = 1.0;
+    let mut policy_stable = false;
 
-    //let mut pi_new: Vec<f64> = vec![-1.0; size];
-    //let mut q = vec![0f64; size * prod.actions.len()];
-    //let mut epsilon: f64; // = 1.0;
-    //let mut policy_stable = false;
-//
-    //while !policy_stable {
-    //    policy_stable = true;
-    //    for (ii, a) in prod.actions.iter().enumerate() {
-    //        // new matrix instantiation is fine
-    //        let Pa = P.get(a).unwrap();
-    //        //let Pa = sparse_to_cs(&mut S);
-    //        // we use the rhs matrix dim as this represents the modified state space and
-    //        // value vector
-    //        // Perform the operation P.x
-    //        let mut vmv = vec![0f64; size];
-    //        sp_mv_multiply_f64(Pa.m, &x[..], &mut vmv);
-    //        // Perform the operation R.w
-    //        let mut rmv = vec![0f64; size as usize];
-    //        let Ra = prod.rewards_mat.get(&a).unwrap();
-    //        blas_matrix_vector_mulf64(
-    //            &Ra.m[..],
-    //            &w[..],
-    //            Ra.rows as i32,
-    //            Ra.cols as i32,
-    //            &mut rmv[..]
-    //        );
-    //        println!("rmv after weighting: {:.2?}", rmv);
-    //        assert_eq!(vmv.len(), rmv.len());
-    //        // Perform the operation R.w + P.x
-    //        println!("vmv  {:.2?}", vmv);
-    //        add_vecs(&rmv[..], &mut vmv[..], size as i32, 1.0);
-    //        // Add the value vector to the Q table
-    //        update_qmat(&mut q[..], &vmv[..], ii, prod.actions.len() as usize).unwrap();
-    //    }
-    //    // determine the maximum values for each state in the matrix of value estimates
-    //    max_values(&mut xnew[..], &q[..], &mut pi_new[..], size, prod.actions.len());
-    //    copy(&xnew[..], &mut xtemp[..], size as i32);
-    //    // copy the new value vector to calculate epsilon
-    //    add_vecs(&x[..], &mut xnew[..], size as i32, -1.0);
-    //    update_policy(&xnew[..], &eps, &mut pi[..], &pi_new[..], size, &mut policy_stable);
-    //    // Calculate the max epsilon
-    //    // Copy x <- xnew
-    //    copy(&xtemp[..], &mut x[..], size as i32);
-    //}
-//
-    //println!("Constructed scheduler");
-//
-    //let argmaxP = construct_argmax_spmatrix(prod, &pi[..], &P, size, size);
-    //let argmaxR = construct_argmax_Rmatrix(prod, &pi[..], nobjs);
-//
-    //epsilon = 1.0;
-    //let agent_idx = prod.agent_id as usize;
-    //let task_idx = nagents + prod.task_id as usize;
-    //let mut epsilon_old: f64 = 1.0;
-    //while epsilon > *eps && unstable_count < UNSTABLE_POLICY {
-    //    for k in 0..2 {
-    //        // Perform the operation argmaxP.x_k
-    //        let mut vobjvec = vec![0f64; argmaxP.nr];
-    //        sp_mv_multiply_f64(argmaxP.m, &X[k*size..(k+1)*size], &mut vobjvec[..]);
-    //        // Perform the operation R + P.x_k
-    //        // in this operation instead of taking a slice we need to multiply it by some mask
-    //        // i.e. R.e where e = { 1 if ix == k, 0 otherwise }
-    //        let R_ = if k == 0 {
-    //            &argmaxR.m[agent_idx*size..(agent_idx+1)*size]
-    //        } else {
-    //            &argmaxR.m[task_idx*size..(task_idx+1)*size]
-    //        };
-    //        add_vecs(&R_[..], &mut vobjvec[..], size as i32, 1.0);
-    //        copy(&vobjvec[..], &mut Xnew[k*size..(k+1)*size], size as i32);
-    //    }
-    //    // determine the difference between X, Xnew
-    //    let obj_len = (size * 2) as i32;
-    //    copy(&Xnew[..], &mut Xtemp[..], obj_len);
-    //    add_vecs(&Xnew[..], &mut X[..], obj_len, -1.0);
-    //    epsilon = max_eps(&X[..]);
-    //    inf_indices = X.iter()
-    //        .zip(epsold.iter())
-    //        .enumerate()
-    //        .filter(|(_ix, (x, z))| float_eq!(**x - **z, 0., abs <= eps) && **x != 0.)
-    //        .map(|(ix, _)| ix as f64)
-    //        .collect::<Vec<f64>>();
-//
-    //    if inf_indices.len() == inf_indices_old.len() {
-    //        if inf_indices.iter().zip(inf_indices_old.iter()).all(|(val1, val2)| val1 == val2) {
-    //            //println!("eps: {} eps old: {}, inf: {:?}", epsilon, epsilon_old, inf_indices);
-    //            if epsilon < epsilon_old {
-    //                // the value function is still contracting an this is converging, therefore
-    //                // not unstable
-    //                unstable_count = 0;
-    //            } else {
-    //                unstable_count += 1;
-    //            }
-    //        } else {
-    //            unstable_count = 0;
-    //        }
-    //    } else {
-    //        unstable_count = 0;
-    //    }
-    //    //println!("{:?}", t5.elapsed().as_secs_f64());
-    //    copy(&X[..], &mut epsold[..], obj_len);
-    //    // Copy X <- Xnew
-    //    copy(&Xtemp[..], &mut X[..], obj_len);
-    //    // copy the unstable indices
-    //    inf_indices_old = inf_indices;
-    //    epsilon_old = epsilon;
-    //    println!("X: {:.2?}", X);
-    //}
-    //if unstable_count >= UNSTABLE_POLICY {
-    //    //println!("inf indices: {:?}", inf_indices_old);
-    //    for ix in inf_indices_old.iter() {
-    //        if X[*ix as usize] < 0. {
-    //            X[*ix as usize] = -f32::MAX as f64;
-    //        }
-    //    }
-    //}
-//
+    while !policy_stable {
+        policy_stable = true;
+        for (ii, a) in prod.actions.iter().enumerate() {
+            // new matrix instantiation is fine
+            let Pa = P.get(a).unwrap();
+            //let Pa = sparse_to_cs(&mut S);
+            // we use the rhs matrix dim as this represents the modified state space and
+            // value vector
+            // Perform the operation P.x
+            let mut vmv = vec![0f64; size];
+            sp_mv_multiply_f64(Pa.m, &x[..], &mut vmv);
+            // Perform the operation R.w
+            let mut rmv = vec![0f64; size as usize];
+            let Ra = prod.rewards_mat.get(&a).unwrap();
+            blas_matrix_vector_mulf64(
+                &Ra.m[..],
+                &w[..],
+                Ra.rows as i32,
+                Ra.cols as i32,
+                &mut rmv[..]
+            );
+            assert_eq!(vmv.len(), rmv.len());
+            // Perform the operation R.w + P.x
+            add_vecs(&rmv[..], &mut vmv[..], size as i32, 1.0);
+            // Add the value vector to the Q table
+            update_qmat(&mut q[..], &vmv[..], ii, prod.actions.len() as usize).unwrap();
+        }
+        // determine the maximum values for each state in the matrix of value estimates
+        max_values(&mut xnew[..], &q[..], &mut pi_new[..], size, prod.actions.len());
+        copy(&xnew[..], &mut xtemp[..], size as i32);
+        // copy the new value vector to calculate epsilon
+        add_vecs(&x[..], &mut xnew[..], size as i32, -1.0);
+        update_policy(&xnew[..], &eps, &mut pi[..], &pi_new[..], size, &mut policy_stable);
+        // Calculate the max epsilon
+        // Copy x <- xnew
+        copy(&xtemp[..], &mut x[..], size as i32);
+    }
+
+    let argmaxP = construct_argmax_spmatrix(prod, &pi[..], &P, size);
+    let argmaxR = construct_argmax_Rmatrix(prod, &pi[..], nobjs);
+
+    epsilon = 1.0;
+    let agent_idx = prod.agent_id as usize;
+    let task_idx = nagents + prod.task_id as usize;
+    let mut epsilon_old: f64 = 1.0;
+    while epsilon > *eps && unstable_count < UNSTABLE_POLICY {
+        for k in 0..2 {
+            // Perform the operation argmaxP.x_k
+            let mut vobjvec = vec![0f64; argmaxP.nr];
+            sp_mv_multiply_f64(argmaxP.m, &X[k*size..(k+1)*size], &mut vobjvec[..]);
+            // Perform the operation R + P.x_k}
+            let R_ = if k == 0 {
+                &argmaxR.m[agent_idx*size..(agent_idx+1)*size]
+            } else {
+                &argmaxR.m[task_idx*size..(task_idx+1)*size]
+            };
+            add_vecs(&R_[..], &mut vobjvec[..], size as i32, 1.0);
+            copy(&vobjvec[..], &mut Xnew[k*size..(k+1)*size], size as i32);
+        }
+        // determine the difference between X, Xnew
+        let obj_len = (size * 2) as i32;
+        copy(&Xnew[..], &mut Xtemp[..], obj_len);
+        add_vecs(&Xnew[..], &mut X[..], obj_len, -1.0);
+        epsilon = max_eps(&X[..]);
+        inf_indices = X.iter()
+            .zip(epsold.iter())
+            .enumerate()
+            .filter(|(_ix, (x, z))| float_eq!(**x - **z, 0., abs <= eps) && **x != 0.)
+            .map(|(ix, _)| ix as f64)
+            .collect::<Vec<f64>>();
+
+        if inf_indices.len() == inf_indices_old.len() {
+            if inf_indices.iter().zip(inf_indices_old.iter()).all(|(val1, val2)| val1 == val2) {
+                if epsilon < epsilon_old {
+                    // the value function is still contracting an this is converging, therefore
+                    // not unstable
+                    unstable_count = 0;
+                } else {
+                    unstable_count += 1;
+                }
+            } else {
+                unstable_count = 0;
+            }
+        } else {
+            unstable_count = 0;
+        }
+        copy(&X[..], &mut epsold[..], obj_len);
+        // Copy X <- Xnew
+        copy(&Xtemp[..], &mut X[..], obj_len);
+        // copy the unstable indices
+        inf_indices_old = inf_indices;
+        epsilon_old = epsilon;
+    }
+    if unstable_count >= UNSTABLE_POLICY {
+        for ix in inf_indices_old.iter() {
+            if X[*ix as usize] < 0. {
+                X[*ix as usize] = -f32::MAX as f64;
+            }
+        }
+    }
+
     let mut r: Vec<f64> = vec![0.; 2];
-    //// get the index of the initial state
-    //let init_idx = prod.get_state_map().get(&prod.initial_state).unwrap();
-    //r[0] = X[*init_idx];
-    //r[1] = X[size + *init_idx];
-    ////println!("Agent: {}, Task: {}, R: {:?}", prod.agent_id, prod.task_id, r);
+    // get the index of the initial state
+    let init_idx = prod.get_state_map().get(&prod.initial_state).unwrap();
+    r[0] = X[*init_idx];
+    r[1] = X[size + *init_idx];
     (pi, r)
 }
 
@@ -204,8 +178,7 @@ fn construct_argmax_spmatrix(
     prod: &MOProductMDP, 
     pi: &[f64], 
     matrices: &HashMap<i32, SparseMatrix>,
-    rows: usize,
-    cols: usize
+    size: usize
 ) -> SparseMatrix {
     // todo convert Sparse to argmaxSparse
 
@@ -223,16 +196,16 @@ fn construct_argmax_spmatrix(
     let mut argmax_j: Vec<i32> = Vec::new();
     let mut argmax_vals: Vec<f64> = Vec::new();
 
-    for c in 0..rows {
+    for c in 0..size {
         let matcomp = transposes.get(&(pi[c] as i32)).unwrap();
         let p = &matcomp.p;
         let i = &matcomp.i;
         let x = &matcomp.x;
         if p[c + 1] - p[c] > 0 {
-            // for each row recorder in CSS add the transport of the coord
+            // for each row recorder in CSS add the transpose of the coord
             for r in p[c]..p[c+1] {
-                argmax_i.push(i[r as usize]);
-                argmax_j.push(c as i32);
+                argmax_j.push(i[r as usize]);
+                argmax_i.push(c as i32);
                 argmax_vals.push(x[r as usize]);
             }
         }
@@ -241,8 +214,8 @@ fn construct_argmax_spmatrix(
     let nnz = argmax_vals.len();
 
     let T = create_sparse_matrix(
-        rows as i32,
-        cols as i32,
+        size as i32,
+        size as i32,
         &argmax_i[..],
         &argmax_j[..],
         &argmax_vals[..]
@@ -251,8 +224,8 @@ fn construct_argmax_spmatrix(
     let A = convert_to_compressed(T);
     SparseMatrix {
         m: A,
-        nr: rows,
-        nc: cols,
+        nr: size,
+        nc: size,
         nnz: nnz
     }
 }
@@ -265,7 +238,6 @@ fn construct_argmax_Rmatrix(
     let size = prod.states.len();
     let mut R: Vec<f64> = vec![0.; size * nobjs];
     for r in 0..size {
-        let action = pi[r] as i32;
         let rewards = prod.rewards_mat.get(&(pi[r] as i32)).unwrap();
         for c in 0..nobjs {
             R[c * size + r] = rewards.m[c * size + r]; 
@@ -410,9 +382,6 @@ pub fn print_rewards_matrices(
     blas_rewards_matrices: &HashMap<i32, DenseMatrix>,
     state_map: &HashMap<usize, (i32, i32)>,
     actions: &[i32],
-    // states: &[(i32, i32)],
-    agent: i32,
-    task: i32
 ) {
     for action in actions.iter() {
         let m = blas_rewards_matrices.get(action).unwrap();

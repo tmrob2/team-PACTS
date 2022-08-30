@@ -233,7 +233,7 @@ pub fn scheduler_synthesis(model: &SCPM, w: &[f64], eps: &f64, t: &[f64], prods_
                     }
                 }
             }
-            Err(e) => {
+            Err(_e) => {
                 // the LP has finished and there are no more points which can be added to the
                 // the polytope
                 lpvalid = false;

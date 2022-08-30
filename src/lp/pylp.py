@@ -86,5 +86,5 @@ def eucl_new_target(X, W, t, l, n):
     prob.solve()
     print("status", prob.status)
     print("optimal value", prob.value)
-    print("optimial var", z.value)
+    print("optimal var", z.value)
     return z.value
