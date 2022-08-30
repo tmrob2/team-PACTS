@@ -14,6 +14,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Task processing channel')
     parser.add_argument('--interval', dest='interval', 
         help='the interval of a batches before an SCPM is created and processed')
+    parser.add_argument('--eps', dest="eps", help="Epsilon value for value iteration")
     args = parser.parse_args()
     if not args.interval:
         parser.error("interval must be included")
@@ -21,6 +22,8 @@ if __name__ == "__main__":
     # A multiagent team to conduct a set of multiobjective missions
     team = ce.Team()
     mission = ce.Mission() 
+
+    eps = 0.0001 if not args.eps else args.eps
 
     batch_count = args.interval
 
@@ -48,4 +51,14 @@ if __name__ == "__main__":
                 print(f"Could not convert msg: {message} to task")
     
         # construct and SCPM to process the tasks
-        scpm = ce.SCPM(team, mission)
+        if batch_count % args.interval == 0:
+            # If we get to the batch limit trigger an SCPM computation event
+            scpm = ce.SCPM(team, mission)
+            na = team.size
+            nt = mission.size
+            # Set an initial weight vector for multi-objective optimisation
+            w = [1 / (na + nt)] * (na + nt)
+            target = [-5] * na + [0.98] * nt 
+            # todo the cost and the lowerbound on probability should also be 
+            # set by terminal argument
+            ce.scheduler_synthesis(scpm, w, eps, target)

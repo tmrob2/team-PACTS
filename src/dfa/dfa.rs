@@ -82,6 +82,7 @@ impl DFA {
 #[derive(Clone)]
 pub struct Mission {
     pub tasks: Vec<DFA>,
+    #[pyo3(get)]
     pub size: usize
 }
 

@@ -56,15 +56,6 @@ def new_target_(X, W, t, l, m, n): #, ii, cstep, pstep):
     #print(solution)
     return solution
 
-#def upper_bound(t, ii, prob_step, j, cstep, n):
-#    if j < n:
-#        return t[j] - ii * cstep
-#    else:
-#        if t[j] - ii * prob_step:
-#            return t[j] - ii * prob_step
-#        else:
-#            raise("target doesn't exist")
-
 import cvxpy as cp
 
 def eucl_new_target(X, W, t, l, n):
@@ -88,3 +79,7 @@ def eucl_new_target(X, W, t, l, n):
     print("optimal value", prob.value)
     print("optimal var", z.value)
     return z.value
+
+
+def radomised_scheduler():
+    pass

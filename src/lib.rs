@@ -405,10 +405,19 @@ fn test_alloc(model: &SCPM, w: Vec<f64>, eps: f64) {
 
 #[pyfunction]
 #[pyo3(name="scheduler_synthesis")]
-fn meta_scheduler_synthesis(model: &SCPM, w: Vec<f64>, eps: f64, target: Vec<f64>) {
+fn meta_scheduler_synthesis(
+    model: &SCPM, 
+    w: Vec<f64>, 
+    eps: f64, 
+    target: Vec<f64>
+) {
     let prods = model.construct_products();
-    let (_pis, _hullset, _t_new) = scheduler_synthesis(model, &w[..], &eps, &target[..], prods);
+    let (pis, _hullset, _t_new) = scheduler_synthesis(model, &w[..], &eps, &target[..], prods);
     //println!("{:?}", pis);
+    // convert output schedulers to 
+    // we need to construct the randomised scheduler here, then the output from the randomised
+    // scheduler, which will already be from a python script, will be the output of this function
+    // also
 }
 
 /// A Python module implemented in Rust.
