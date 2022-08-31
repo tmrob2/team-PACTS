@@ -27,35 +27,6 @@ def hyperplane_solver(X, t, nobj):
     solution = [value(w[i]) for i in range(nobj)]
     return solution
 
-def new_target_(X, W, t, l, m, n): #, ii, cstep, pstep):
-    # n - num agents
-    # m - num tasks
-    # ii - iterations
-    # cstep - cost step
-    model = LpProblem("NoName", LpMinimize)
-    solver = CPLEX_CMD(path=cplex_dir, msg=False)
-    print(n)
-    lambda_ = {i: LpVariable(name=f"lambda{i}", lowBound=0, upBound=1.0) for i in range(l) }
-    z = {i: LpVariable(name=f"z{i}", upBound=t[i]) for i in range(n + m)}
-    epsilon = LpVariable(name="epsilon")
-
-    for j in range(n+m):
-        model += lpSum([X[k][j] * lambda_[k] for k in range(l)]) - epsilon <= z[j]
-
-    for k in range(l):
-        model += lpDot(W[k], z[k]) <= np.dot(W[k], X[k])
-
-    model += lpSum([lambda_[k] for k in range(l)]) == 1
-
-    model += epsilon
-
-    print(model)
-    status = model.solve(solver)
-    #print(status)
-    solution = [value(z[j]) for j in range(n + m)]
-    #print(solution)
-    return solution
-
 import cvxpy as cp
 
 def eucl_new_target(X, W, t, l, n):

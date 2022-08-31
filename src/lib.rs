@@ -396,11 +396,9 @@ fn value_iteration_test(model: &MOProductMDP, w: Vec<f64>, nagents: usize, ntask
 #[pyo3(name="alloc_test")]
 fn test_alloc(model: &SCPM, w: Vec<f64>, eps: f64) {
     let prods = model.construct_products();
-    let (r, _prods, pis) = process_scpm(
-        model, &w[..], &eps, prods
-    );
-    println!("r {:?}", r);
-    println!("pis {:?}", pis);
+    let (_r, _prods, _pis) = process_scpm(model, &w[..], &eps, prods);
+    //println!("r {:?}", r);
+    //println!("pis {:?}", pis);
 }
 
 #[pyfunction]

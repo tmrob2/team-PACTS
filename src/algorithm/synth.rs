@@ -18,32 +18,43 @@ pub fn process_scpm(
     // which processes them and then return those models again for reprocessing
     let num_agents = model.agents.size;
     let num_tasks = model.tasks.size;
-    let (prods, mut pis, result) = process_mdps(prods, &w[..], &eps, num_agents, num_tasks).unwrap();
-    //println!("result: {:?}", result);
-    // compute a rewards model
-    let rewards_function = model.insert_rewards(result);
-    let nobjs = model.agents.size + model.tasks.size;
-    let blas_transition_matrices = model.grid.create_dense_transition_matrix(
-        model.tasks.size
-    );
-    let blas_rewards_matrices = model.grid.create_dense_rewards_matrix(
-        nobjs, 
-        model.agents.size, 
-        model.tasks.size,
-        &rewards_function,
-    );
-    //model.print_rewards_matrices(&blas_rewards_matrices);
-    let (alloc, r) = model.value_iteration(
-        eps, 
-        &w[..], 
-        &blas_transition_matrices, 
-        &blas_rewards_matrices
-    );
-    //println!("Alloc: {:?}", alloc);
-    let task_allocation = alloc_dfs(model, alloc);
-    //println!("task alloc: {:?}", task_allocation);
-    retain_alloc_policies(&task_allocation[..], &mut pis);
+    let (prods, mut pis, alloc_map, mut result) = process_mdps(prods, &w[..], &eps, num_agents, num_tasks).unwrap();
+    println!("result: {:?}", result);
+    println!("pis \n{:?}", pis);
+
+    for task in 0..model.tasks.size {
+        let v_tot_cost = result.get_mut(&(task as i32)).unwrap(); // <- this will be a vector (agent, weighted cost)
+        // sort the vector of (agent, tot cost) by cost
+        v_tot_cost.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+    }
+    //// compute a rewards model
+    //let rewards_function = model.insert_rewards(result);
+    //let nobjs = model.agents.size + model.tasks.size;
+    //// we don't need to do any of this either, just ordering and recording
+    //let blas_transition_matrices = model.grid.create_dense_transition_matrix(
+    //    model.tasks.size
+    //);
+    //let blas_rewards_matrices = model.grid.create_dense_rewards_matrix(
+    //    nobjs, 
+    //    model.agents.size, 
+    //    model.tasks.size,
+    //    &rewards_function,
+    //);
+    ////model.print_rewards_matrices(&blas_rewards_matrices);
+    //// todo we don't actually need to do this we can just choose an allocation
+    //// based on the maximised expected value
+    //let (alloc, r) = model.value_iteration(
+    //    eps, 
+    //    &w[..], 
+    //    &blas_transition_matrices, 
+    //    &blas_rewards_matrices
+    //);
+    ////println!("Alloc: {:?}", alloc);
+    //let task_allocation = alloc_dfs(model, alloc);
+    ////println!("task alloc: {:?}", task_allocation);
+    //retain_alloc_policies(&task_allocation[..], &mut pis);
     //println!("pis returned aftern retain: {:?}", pis);
+    let r = Vec::new();
     (r, prods, pis)
 }
 
