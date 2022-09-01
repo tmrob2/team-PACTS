@@ -20,6 +20,7 @@ pub fn process_scpm(
     let num_tasks = model.tasks.size;
     let (prods, mut pis, alloc_map, mut result) = process_mdps(prods, &w[..], &eps, num_agents, num_tasks).unwrap();
 
+    println!("allocation map: {:?}", alloc_map);
     let alloc: Vec<(i32, i32)> = Vec::new();
     for task in 0..model.tasks.size {
         println!("task: {}", task);
