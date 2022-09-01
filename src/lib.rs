@@ -396,9 +396,12 @@ fn value_iteration_test(model: &MOProductMDP, w: Vec<f64>, nagents: usize, ntask
 #[pyo3(name="alloc_test")]
 fn test_alloc(model: &SCPM, w: Vec<f64>, eps: f64) {
     let prods = model.construct_products();
-    let (_r, _prods, _pis) = process_scpm(model, &w[..], &eps, prods);
-    //println!("r {:?}", r);
-    //println!("pis {:?}", pis);
+    let (r, _prods, pis, alloc) = process_scpm(model, &w[..], &eps, prods);
+    println!("r {:?}", r);
+    println!("pis {:?}", pis);
+    println!("alloc: {:?}", alloc);
+
+    // then we will use the allocation to compute the randomised scheduler
 }
 
 #[pyfunction]

@@ -12,7 +12,7 @@ pub fn process_scpm(
     w: &[f64], 
     eps: &f64,
     prods: Vec<MOProductMDP>
-) -> (Vec<f64>, Vec<MOProductMDP>, HashMap<(i32, i32), Vec<f64>>) {
+) -> (Vec<f64>, Vec<MOProductMDP>, HashMap<(i32, i32), Vec<f64>>, Vec<(i32, i32, Vec<f64>)>) {
     // Algorithm 1 will need to follow this format
     // where we move the ownership of the product models into a function 
     // which processes them and then return those models again for reprocessing
@@ -21,17 +21,14 @@ pub fn process_scpm(
     let (prods, mut pis, alloc_map, mut result) = process_mdps(prods, &w[..], &eps, num_agents, num_tasks).unwrap();
     
     let mut r = vec![0.; num_agents + num_tasks];
-    println!("allocation map: {:?}", alloc_map);
-    let alloc: Vec<(i32, i32)> = Vec::new();
+    let mut alloc: Vec<(i32, i32, Vec<f64>)> = Vec::new();
     for task in 0..model.tasks.size {
-        println!("task: {}", task);
         let v_tot_cost = result.get_mut(&(task as i32)).unwrap(); // <- this will be a vector (agent, weighted cost)
         // sort the vector of (agent, tot cost) by cost
         v_tot_cost.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap()); // reflects maximisation
-        println!("tot cost by task: {:?}", v_tot_cost);
-        println!("Task j should be allocated to agent: {}", v_tot_cost[0].0);
         // get the allocation multi-objective vector for the task and add it to r
         let rij = alloc_map.get(&(v_tot_cost[0].0, task as i32)).unwrap();
+        alloc.push((v_tot_cost[0].0, task as i32, rij.to_vec()));
         // add the agent cost to the allocation rewards
         r[v_tot_cost[0].0 as usize] += rij[0];
         // add the task cost to the allocation rewards
@@ -42,44 +39,7 @@ pub fn process_scpm(
             }
         }
     }
-
-    println!("pis after non allocated tasks removed: {:?}", pis);
-
-    println!("total allocated cost: {:?}", r);
-
-    // so then once we know which tasks should be allocated to which agents we need to
-    // get those policies which relate to the tasks
-
-    // also we need to store the cost and task probability for each of the schedulers
-
-    //// compute a rewards model
-    //let rewards_function = model.insert_rewards(result);
-    //let nobjs = model.agents.size + model.tasks.size;
-    //// we don't need to do any of this either, just ordering and recording
-    //let blas_transition_matrices = model.grid.create_dense_transition_matrix(
-    //    model.tasks.size
-    //);
-    //let blas_rewards_matrices = model.grid.create_dense_rewards_matrix(
-    //    nobjs, 
-    //    model.agents.size, 
-    //    model.tasks.size,
-    //    &rewards_function,
-    //);
-    ////model.print_rewards_matrices(&blas_rewards_matrices);
-    //// todo we don't actually need to do this we can just choose an allocation
-    //// based on the maximised expected value
-    //let (alloc, r) = model.value_iteration(
-    //    eps, 
-    //    &w[..], 
-    //    &blas_transition_matrices, 
-    //    &blas_rewards_matrices
-    //);
-    ////println!("Alloc: {:?}", alloc);
-    //let task_allocation = alloc_dfs(model, alloc);
-    ////println!("task alloc: {:?}", task_allocation);
-    //retain_alloc_policies(&task_allocation[..], &mut pis);
-    //println!("pis returned aftern retain: {:?}", pis);
-    (r, prods, pis)
+    (r, prods, pis, alloc)
 }
 
 fn retain_alloc_policies(alloc: &[GridState], pis: &mut HashMap<(i32, i32), Vec<f64>>) {
