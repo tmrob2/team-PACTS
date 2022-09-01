@@ -20,6 +20,7 @@ pub fn process_scpm(
     let num_tasks = model.tasks.size;
     let (prods, mut pis, alloc_map, mut result) = process_mdps(prods, &w[..], &eps, num_agents, num_tasks).unwrap();
 
+    let alloc: Vec<(i32, i32)> = Vec::new();
     for task in 0..model.tasks.size {
         println!("task: {}", task);
         let v_tot_cost = result.get_mut(&(task as i32)).unwrap(); // <- this will be a vector (agent, weighted cost)
@@ -27,7 +28,19 @@ pub fn process_scpm(
         v_tot_cost.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap()); // reflects maximisation
         println!("tot cost by task: {:?}", v_tot_cost);
         println!("Task j should be allocated to agent: {}", v_tot_cost[0].0);
+        for i in 0..model.agents.size {
+            if i as i32 != v_tot_cost[0].0 {
+                pis.remove(&(i as i32, task as i32));
+            }
+        }
     }
+
+    println!("pis after non allocated tasks removed: {:?}", pis);
+
+    // so then once we know which tasks should be allocated to which agents we need to
+    // get those policies which relate to the tasks
+
+    // also we need to store the cost and task probability for each of the schedulers
 
     //// compute a rewards model
     //let rewards_function = model.insert_rewards(result);
