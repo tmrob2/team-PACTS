@@ -97,6 +97,7 @@ pub fn scheduler_synthesis(model: &SCPM, w: &[f64], eps: &f64, t: &[f64], prods_
     let mut X: HashSet<Vec<Mantissa>> = HashSet::new();
     let mut W: HashSet<Vec<Mantissa>> = HashSet::new();
     let mut schedulers: Vec<HashMap<(i32, i32), Vec<f64>>> = Vec::new();
+    let mut allocation_acc: Vec<(i32, i32, i32, Vec<f64>)> = Vec::new();
     //let num_agents = model.agents.size;
     //let num_tasks = model.tasks.size;
     let mut prods = prods_;
@@ -110,6 +111,9 @@ pub fn scheduler_synthesis(model: &SCPM, w: &[f64], eps: &f64, t: &[f64], prods_
     let (r, prods_, pis, alloc) = process_scpm(
         model, &w[..], &eps, prods 
     );
+    for (agent_, task_, r_) in alloc.into_iter() {
+        allocation_acc.push((0, agent_, task_, r_));
+    }
 
     // every single sheduler has been returned at this point, but we only need those which 
     // correspond to alloc
@@ -187,6 +191,10 @@ pub fn scheduler_synthesis(model: &SCPM, w: &[f64], eps: &f64, t: &[f64], prods_
                         let (r, prods_, pis, alloc) = process_scpm(
                             model, &w[..], &eps, prods
                         );
+
+                        for (agent_, task_, r_) in alloc.into_iter() {
+                            allocation_acc.push((count as i32, agent_, task_, r_));
+                        }
                         //println!("pis {:?}", pis);
                         //println!("r new: {:.2?}", r);
                         prods = prods_;
