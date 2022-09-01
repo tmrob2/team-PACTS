@@ -35,7 +35,7 @@ pub fn process_scpm(
         // add the agent cost to the allocation rewards
         r[v_tot_cost[0].0 as usize] += rij[0];
         // add the task cost to the allocation rewards
-        r[task] += rij[1];
+        r[num_agents + task] += rij[1];
         for i in 0..model.agents.size {
             if i as i32 != v_tot_cost[0].0 {
                 pis.remove(&(i as i32, task as i32));
