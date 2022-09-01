@@ -83,7 +83,7 @@ pub fn alloc_dfs(model: &SCPM, policy: Vec<f64>) -> Vec<GridState> {
 
 
 pub fn scheduler_synthesis(model: &SCPM, w: &[f64], eps: &f64, t: &[f64], prods_: Vec<MOProductMDP>) 
--> (Vec<HashMap<(i32, i32), Vec<f64>>>, HashMap<usize, Vec<f64>>, Vec<f64>) {
+-> (Vec<HashMap<(i32, i32), Vec<f64>>>, Vec<(i32, i32, i32, Vec<f64>)>, Vec<f64>) {
     let t1 = Instant::now();
     //let torig = t.to_vec();
     //println!("initial w: {:.3?}", w);
@@ -141,12 +141,12 @@ pub fn scheduler_synthesis(model: &SCPM, w: &[f64], eps: &f64, t: &[f64], prods_
         );
         match tnew_ {
             Ok(x) => {
-                println!("tnew: {:?}", x);
+                println!("tnew: {:.2?}", x);
                 tnew = x;
                 //return (schedulers, hullset, x)
             }
             Err(_) => {
-                panic!("ahhh!");
+                panic!("A solution to the convex optimisation could not be found!");
             }
         }
         // repeat 
@@ -244,23 +244,5 @@ pub fn scheduler_synthesis(model: &SCPM, w: &[f64], eps: &f64, t: &[f64], prods_
         }
     }
     println!("Time: {:.3}", t1.elapsed().as_secs_f32());
-    (schedulers, hullset, tnew)
-}
-
-fn z_star(X: &[Vec<f64>], tnew: Vec<f64>) {
-    let mut vals: Vec<f64> = vec![0.; X.len()];
-    assert_ne!(X.len(), 0);
-    for (k, x) in X.iter().enumerate() {
-        vals[k] = l2norm(&x[..], &tnew[..]);
-    }
-    //vals.iter().enumerate().fold(f64::NEG_INFINITY, |k, val| f64::max)
-}
-
-fn l2norm(x: &[f64], y: &[f64]) -> f64 {
-    let mut z: Vec<f64> = vec![0.; x.len()];
-    for k in 0..z.len() {
-        z[k] = (x[k] - y[k]).powf(2.);
-    }
-    let zsum: f64 = z.iter().sum();
-    zsum.sqrt()
+    (schedulers, allocation_acc, tnew)
 }

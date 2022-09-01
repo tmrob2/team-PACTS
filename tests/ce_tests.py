@@ -1,9 +1,8 @@
 import ce
 import random
-import redis
 
 NUM_AGENTS = 2
-NUM_TASKS = 2
+NUM_TASKS = 10
 
 def transition_map(agent, seed, mu, std):
     # generate the transition with some random probability to simulate 
@@ -86,6 +85,6 @@ if __name__ == "__main__":
     w = [1 / (NUM_AGENTS + NUM_TASKS)] * ( NUM_AGENTS + NUM_TASKS )
     #w = [0, 0, 0.5, 0.5]
     #scpm.print_transitions()
-    #target = [-5] * NUM_AGENTS + [0.98] * NUM_TASKS 
-    #ce.scheduler_synthesis(scpm, w, 0.0001, target)
-    ce.alloc_test(scpm, w, 0.0001)
+    target = [-7] * NUM_AGENTS + [0.97] * NUM_TASKS 
+    ce.scheduler_synthesis(scpm, w, 0.0001, target)
+    #ce.alloc_test(scpm, w, 0.0001)

@@ -51,7 +51,7 @@ pub fn process_mdps(
         // convert r to the complete multi-objective r
         let mut mo_exp_cost = vec![0.; num_tasks + num_agents];
         mo_exp_cost[mdp.agent_id as usize] = r[0];
-        mo_exp_cost[num_tasks + mdp.task_id as usize] = r[1];
+        mo_exp_cost[num_agents + mdp.task_id as usize] = r[1];
         let exp_w_tot_cost = blas_dot_product(&mo_exp_cost[..], w);
         // then multiply by w to get to 
         match result.get_mut(&mdp.task_id) {
