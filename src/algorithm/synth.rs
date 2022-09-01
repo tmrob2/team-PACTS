@@ -21,7 +21,7 @@ pub fn process_scpm(
     let (prods, mut pis, alloc_map, mut result) = process_mdps(prods, &w[..], &eps, num_agents, num_tasks).unwrap();
 
     for task in 0..model.tasks.size {
-        println!("task: {}", j);
+        println!("task: {}", task);
         let v_tot_cost = result.get_mut(&(task as i32)).unwrap(); // <- this will be a vector (agent, weighted cost)
         // sort the vector of (agent, tot cost) by cost
         v_tot_cost.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
