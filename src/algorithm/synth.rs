@@ -32,9 +32,10 @@ pub fn process_scpm(
         println!("Task j should be allocated to agent: {}", v_tot_cost[0].0);
         // get the allocation multi-objective vector for the task and add it to r
         let rij = alloc_map.get(&(v_tot_cost[0].0, task as i32)).unwrap();
-        for k in 0..num_agents + num_tasks {
-            r[k] += rij[k];
-        }
+        // add the agent cost to the allocation rewards
+        r[v_tot_cost[0].0 as usize] += rij[0];
+        // add the task cost to the allocation rewards
+        r[task] += rij[1];
         for i in 0..model.agents.size {
             if i as i32 != v_tot_cost[0].0 {
                 pis.remove(&(i as i32, task as i32));
