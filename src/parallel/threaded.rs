@@ -66,7 +66,7 @@ pub fn process_mdps(
         mdp_return_vec.push(mdp);
     }
 
-    println!("allocation hashmap: \n{:?}", alloc_map);
+    //println!("allocation hashmap: \n{:?}", alloc_map);
     
     //println!("time: {:?}, Result: {:.2?} \n {:?}", t1.elapsed().as_secs_f64(), result, pis);
     Ok((mdp_return_vec, pis, alloc_map, result))
