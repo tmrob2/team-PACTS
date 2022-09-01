@@ -24,8 +24,9 @@ pub fn process_scpm(
         println!("task: {}", task);
         let v_tot_cost = result.get_mut(&(task as i32)).unwrap(); // <- this will be a vector (agent, weighted cost)
         // sort the vector of (agent, tot cost) by cost
-        v_tot_cost.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+        v_tot_cost.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap()); // reflects maximisation
         println!("tot cost by task: {:?}", v_tot_cost);
+        println!("Task j should be allocated to agent: {}", v_tot_cost[0].0);
     }
 
     //// compute a rewards model

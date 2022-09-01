@@ -79,7 +79,6 @@ if __name__ == "__main__":
     #)
     #product_mdp.print_transitions()
     #product_mdp.print_rewards()
-    print("are any of my changes going through")
     
     scpm = ce.SCPM(team, mission)
     #w = [0] * NUM_AGENTS + [1 / NUM_TASKS] * NUM_TASKS
