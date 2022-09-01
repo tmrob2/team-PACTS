@@ -26,7 +26,9 @@ pub fn process_scpm(
         let v_tot_cost = result.get_mut(&(task as i32)).unwrap(); // <- this will be a vector (agent, weighted cost)
         // sort the vector of (agent, tot cost) by cost
         v_tot_cost.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+        println!("tot cost by task: {:?}", v_tot_cost);
     }
+
     //// compute a rewards model
     //let rewards_function = model.insert_rewards(result);
     //let nobjs = model.agents.size + model.tasks.size;
