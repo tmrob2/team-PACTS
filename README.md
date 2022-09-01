@@ -33,7 +33,10 @@ src /
 
     |- scpm / (Could be deprecated)
 
-            |-model.rs: Contains the Product MDP M x A where M is the agent MDP and A is a DFA corresponding to task j, called the MOProductMDP and its implementation. Also Contains a MOTAP problem meta struct called SCPM, which for a given batch, contains the team of agents -> Team and the collection of tasks -> Mission. SCPM implements the product builder function for generating MOProductMDPs
+            |-model.rs: Contains the Product MDP M x A where M is the agent MDP and A is a DFA
+             corresponding to task j, called the MOProductMDP and its implementation. Also Contains 
+             a MOTAP problem meta struct called SCPM, which for a given batch, contains the team of agents -> Team and the collection of tasks -> Mission. SCPM implements the product 
+             builder function for generating MOProductMDPs
 
     |- lib.rs: Library of general helper functions and utilities. Contains cBLAS FFI functions, the wrappert to CX Sparse BLAS functions, value iteration helpers, python interface linking, numeric helpers, and lp python wrappers
 
