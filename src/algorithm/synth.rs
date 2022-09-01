@@ -19,7 +19,8 @@ pub fn process_scpm(
     let num_agents = model.agents.size;
     let num_tasks = model.tasks.size;
     let (prods, mut pis, alloc_map, mut result) = process_mdps(prods, &w[..], &eps, num_agents, num_tasks).unwrap();
-
+    
+    let mut r = vec![0.; num_agents + num_tasks];
     println!("allocation map: {:?}", alloc_map);
     let alloc: Vec<(i32, i32)> = Vec::new();
     for task in 0..model.tasks.size {
@@ -29,6 +30,11 @@ pub fn process_scpm(
         v_tot_cost.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap()); // reflects maximisation
         println!("tot cost by task: {:?}", v_tot_cost);
         println!("Task j should be allocated to agent: {}", v_tot_cost[0].0);
+        // get the allocation multi-objective vector for the task and add it to r
+        let rij = alloc_map.get(&(v_tot_cost[0].0, task as i32)).unwrap();
+        for k in 0..num_agents + num_tasks {
+            r[k] += rij[k];
+        }
         for i in 0..model.agents.size {
             if i as i32 != v_tot_cost[0].0 {
                 pis.remove(&(i as i32, task as i32));
@@ -37,6 +43,8 @@ pub fn process_scpm(
     }
 
     println!("pis after non allocated tasks removed: {:?}", pis);
+
+    println!("total allocated cost: {:?}", r);
 
     // so then once we know which tasks should be allocated to which agents we need to
     // get those policies which relate to the tasks
@@ -70,7 +78,6 @@ pub fn process_scpm(
     ////println!("task alloc: {:?}", task_allocation);
     //retain_alloc_policies(&task_allocation[..], &mut pis);
     //println!("pis returned aftern retain: {:?}", pis);
-    let r = Vec::new();
     (r, prods, pis)
 }
 
