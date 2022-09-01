@@ -107,7 +107,7 @@ pub fn scheduler_synthesis(model: &SCPM, w: &[f64], eps: &f64, t: &[f64], prods_
 
     // compute the initial point for the random weight vector
     println!("Num agents: {}, Num tasks: {}", model.agents.size, model.tasks.size);
-    let (r, prods_, pis) = process_scpm(
+    let (r, prods_, pis, alloc) = process_scpm(
         model, &w[..], &eps, prods 
     );
 
@@ -184,7 +184,7 @@ pub fn scheduler_synthesis(model: &SCPM, w: &[f64], eps: &f64, t: &[f64], prods_
                         lpvalid = false;
                     }
                     false => { 
-                        let (r, prods_, pis) = process_scpm(
+                        let (r, prods_, pis, alloc) = process_scpm(
                             model, &w[..], &eps, prods
                         );
                         //println!("pis {:?}", pis);
