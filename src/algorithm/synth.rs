@@ -19,8 +19,6 @@ pub fn process_scpm(
     let num_agents = model.agents.size;
     let num_tasks = model.tasks.size;
     let (prods, mut pis, alloc_map, mut result) = process_mdps(prods, &w[..], &eps, num_agents, num_tasks).unwrap();
-    println!("result: {:?}", result);
-    println!("pis \n{:?}", pis);
 
     for task in 0..model.tasks.size {
         let v_tot_cost = result.get_mut(&(task as i32)).unwrap(); // <- this will be a vector (agent, weighted cost)
