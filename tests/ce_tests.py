@@ -77,6 +77,7 @@ for i in range(0, NUM_AGENTS):
 if __name__ == "__main__":
     scpm = ce.SCPM(team, mission)
     w = [0] * NUM_AGENTS + [1 / NUM_TASKS] * NUM_TASKS
+    target = [-5] * NUM_AGENTS + [0.97] * NUM_TASKS
     done = False
     while not done:
         try:

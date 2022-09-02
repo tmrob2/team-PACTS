@@ -129,7 +129,6 @@ fn process_mo_reward(
     s: i32,
     q: i32,
     sidx: usize,
-    mdp: &Agent,
     task: &DFA,
     action: i32,
     nobjs: usize,
@@ -184,9 +183,9 @@ pub fn build_model(
 fn product_mdp_bfs(
     initial_state: &(i32, i32),
     mdp: &Agent,
-    mdp_rewards: &HashMap<(i32, i32), f64>,
-    mdp_transitions: &HashMap<(i32, i32), Vec<(i32, f64, String)>>,
-    mdp_available_actions: &HashMap<i32, Vec<i32>>,
+    mdp_rewards: &HashMap<(i32, i32), f64>, // this is a problem
+    mdp_transitions: &HashMap<(i32, i32), Vec<(i32, f64, String)>>, // this is alos a problem
+    mdp_available_actions: &HashMap<i32, Vec<i32>>, // this is also a problem: i.e. we wiull not know any of these things using an env as an mdp
     task: &DFA,
     agent_id: i32, 
     task_id: i32,
@@ -223,7 +222,7 @@ fn product_mdp_bfs(
             // insert the mdp rewards
             let task_idx: usize = nagents + task_id as usize;
             process_mo_reward(
-                &mut rewards, mdp_rewards, s, q, sidx, mdp, task, *action, nobjs, agent_id as usize, task_idx
+                &mut rewards, mdp_rewards, s, q, sidx, task, *action, nobjs, agent_id as usize, task_idx
             );
             for (sprime, p, w) in mdp_transitions.get(&(s, *action)).unwrap().iter() {
                 // add sprime to state map if it doesn't already exist
