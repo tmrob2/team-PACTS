@@ -1,5 +1,6 @@
 import ce
 import random
+import numpy as np
 
 NUM_AGENTS = 2
 NUM_TASKS = 2
@@ -23,7 +24,7 @@ def transition_map(agent, seed, mu, std):
     agent.add_transition(4, 0, [(0, 1.0, "")])
     return agent
 
-def rewards_mdp(agent, r):
+def rewards_map(agent, r):
     # define rewards
     agent.add_reward(0, 0, -r)
     agent.add_reward(1, 0, -r)
@@ -32,19 +33,6 @@ def rewards_mdp(agent, r):
     agent.add_reward(3, 0, -r)
     agent.add_reward(4, 0, -r)
     return agent
-
-# Specify the agents
-team = ce.Team()
-for i in range(0, NUM_AGENTS):
-    agent = ce.Agent(0, list(range(5)), [0, 1])
-    #else:
-    if i == 0:
-        agent = transition_map(agent, 42, 0.011, 0.001)
-        agent = rewards_mdp(agent, 1)
-    else:
-        agent = transition_map(agent, 123, 0.009, 0.001)
-        agent = rewards_mdp(agent, 1)
-    team.add_agent(agent.clone())
 
 def construct_message_sending_task(r):
     task = ce.DFA(list(range(0, 6 + r)), 0, [2 + r + 1], [2 + r + 3], [2 + r + 2])
@@ -66,29 +54,36 @@ def construct_message_sending_task(r):
         task.add_transition(2 + r + 3, w, 2 + r + 3)
     return task
 
+team = ce.Team()
 mission = ce.Mission()
-words = ["", "send", "ready", "exit", "init"]
+
 for k in range(0, NUM_TASKS):
     dfa = construct_message_sending_task(k)
     #print(f"DFA: {k} \n")
     #dfa.print_transitions(words)
     mission.add_task(dfa)
 
+for i in range(0, NUM_AGENTS):
+    agent = ce.Agent(0, list(range(5)), [0, 1])
+    #else:
+    if i == 0:
+        agent = transition_map(agent, 42, 0.02, 0.001)
+        agent = rewards_map(agent, 1)
+    else:
+        agent = transition_map(agent, 123, 0.02, 0.001)
+        agent = rewards_map(agent, 1)
+    team.add_agent(agent)
+
 if __name__ == "__main__":
-    #print(f"Rust calc sum: (5, 20) = {ce.sum_as_string(5, 20)}")
-    initial_state = (0, 0)
-    # test creating the product mdp
-    #print("Testing task 0")
-    product_mdp = ce.build_model(initial_state, agent, mission.get_task(0), 0, 0)
-    #product_mdp.print_transitions()
-    #product_mdp.print_rewards()
-    
     scpm = ce.SCPM(team, mission)
     w = [0] * NUM_AGENTS + [1 / NUM_TASKS] * NUM_TASKS
-    ce.vi_test(product_mdp, w, NUM_AGENTS, NUM_TASKS)
-    #w = [1 / (NUM_AGENTS + NUM_TASKS)] * ( NUM_AGENTS + NUM_TASKS )
-    #w = [0, 0, 0.5, 0.5]
-    #scpm.print_transitions()
-    #target = [-35] * NUM_AGENTS + [0.8] * NUM_TASKS 
-    #ce.scheduler_synthesis(scpm, w, 0.0001, target)
-    #ce.alloc_test(scpm, w, 0.0001)
+    done = False
+    while not done:
+        try:
+            weights, l = ce.scheduler_synthesis(scpm, w, 0.0001, target)
+            print(np.array(weights).reshape([NUM_TASKS, l]))
+            done = True
+        except:
+            print("Got error on generating scheduler synthesis")
+            target = [target[i] - 2 if i < NUM_AGENTS else target[i] for i in range(NUM_AGENTS + NUM_TASKS) ]
+            print(target)

@@ -27,44 +27,6 @@ def hyperplane_solver(X, t, nobj):
     solution = [value(w[i]) for i in range(nobj)]
     return solution
 
-def new_target_(X, W, t, l, m, n): #, ii, cstep, pstep):
-    # n - num agents
-    # m - num tasks
-    # ii - iterations
-    # cstep - cost step
-    model = LpProblem("NoName", LpMinimize)
-    solver = CPLEX_CMD(path=cplex_dir, msg=False)
-    print(n)
-    lambda_ = {i: LpVariable(name=f"lambda{i}", lowBound=0, upBound=1.0) for i in range(l) }
-    z = {i: LpVariable(name=f"z{i}", upBound=t[i]) for i in range(n + m)}
-    epsilon = LpVariable(name="epsilon")
-
-    for j in range(n+m):
-        model += lpSum([X[k][j] * lambda_[k] for k in range(l)]) - epsilon <= z[j]
-
-    for k in range(l):
-        model += lpDot(W[k], z[k]) <= np.dot(W[k], X[k])
-
-    model += lpSum([lambda_[k] for k in range(l)]) == 1
-
-    model += epsilon
-
-    print(model)
-    status = model.solve(solver)
-    #print(status)
-    solution = [value(z[j]) for j in range(n + m)]
-    #print(solution)
-    return solution
-
-#def upper_bound(t, ii, prob_step, j, cstep, n):
-#    if j < n:
-#        return t[j] - ii * cstep
-#    else:
-#        if t[j] - ii * prob_step:
-#            return t[j] - ii * prob_step
-#        else:
-#            raise("target doesn't exist")
-
 import cvxpy as cp
 
 def eucl_new_target(X, W, t, l, n):
@@ -86,5 +48,50 @@ def eucl_new_target(X, W, t, l, n):
     prob.solve()
     print("status", prob.status)
     print("optimal value", prob.value)
-    print("optimial var", z.value)
+    print("optimal var", z.value)
     return z.value
+
+
+def randomised_scheduler(r, t, l, m, n):
+    model = LpProblem("NoName", LpMinimize)
+    solver = CPLEX_CMD(path=cplex_dir, msg=False)
+    c_dict = {}
+    p_dict = {}
+    I = set([])
+
+    # convert r to a dictionary
+    # we also have to collect the set of I, J, K here as well
+    for (k, i, j, r) in r:
+        c_dict[f"{i}_{j}_{k}"] = r[0]
+        if f"{j}_{k}" not in p_dict.keys():
+            p_dict[f"{j}_{k}"] = r[1]
+        else:
+            p_dict[f"{j}_{k}"] += r[1]
+            
+    # Define the decision variables
+    v = {f"{j}_{k}": LpVariable(name=f"v{j}_{k}", lowBound=0., upBound=1.) 
+            for j in range(m) for k in range(l)}
+
+    for i in range(n):
+        sum_var = []
+        for j in range(m):
+            for k in range(l):
+                if f"{i}_{j}_{k}" in c_dict.keys():
+                    sum_var.append(v[f"{j}_{k}"] * c_dict[f"{i}_{j}_{k}"])
+        model += lpSum(sum_var) >= t[i]
+
+    for j in range(m):
+        model += lpSum([v[f"{j}_{k}"]*p_dict[f"{j}_{k}"] for k in range(l)]) >= t[n + j]
+    
+    for j in range(m):
+        model += lpSum([v[f"{j}_{k}"] for k in range(l)]) == 1
+
+    model += 0
+
+    #print(model)
+
+    status = model.solve(solver)
+    #print(status)
+    solution = [value(v[f"{j}_{k}"]) for j in range(m) for k in range(l)]
+    return solution
+

@@ -10,18 +10,28 @@ use float_eq::float_eq;
 /// solution to this problem
 pub fn value_iteration(prod: &MOProductMDP, w: &[f64], eps: &f64, nagents: usize, ntasks:usize) 
     -> (Vec<f64>, Vec<f64>) {
-    
-    //println!("Agent: {}, Task: {}", prod.agent_id, prod.task_id);
     let size = prod.states.len();
     let nobjs: usize = nagents + ntasks;
     // we will need to construct a set of size x size 
     // transition matrices for each action
     //println!("nobjs: {}", nobjs);
-    let P = construct_spblas_matrices(prod);
-    let R = construct_rewards_matrices(prod, nagents, nobjs);
-    print_matrix(sparse_to_cs(&mut P.get(&0).unwrap()));
+    //let P = construct_spblas_matrices(prod);
+    //let R = construct_rewards_matrices(prod, nagents, nobjs);
+    //print_matrix(sparse_to_cs(&mut P.get(&0).unwrap()));
 
     //print_rewards_matrices(&R, prod.get_reverse_state_map(), &prod.actions[..], prod.agent_id, prod.task_id);
+    // convert the matrices to cs_di fmt
+    let mut P: HashMap<i32, SparseMatrix> = HashMap::new();
+    for action in prod.actions.iter() {
+        let TP = prod.transition_mat.get(action).unwrap();
+        let A = sparse_to_cs(TP);
+        P.insert(*action, SparseMatrix {
+            m: A,
+            nr: TP.nr as usize,
+            nc: TP.nc as usize,
+            nnz: TP.nz as usize
+        });
+    }
 
     let mut x = vec![0f64; size]; // value vector for agent-task pair
     let mut xnew = vec![0f64; size]; // new value vector for agent-task pair
@@ -31,9 +41,8 @@ pub fn value_iteration(prod: &MOProductMDP, w: &[f64], eps: &f64, nagents: usize
     let mut pi = random_policy(prod);
 
     // Determine the value of the initial vector
-    let argmaxP = construct_argmax_spPmatrix(prod, &pi[..]);
-    let mut argmaxR = construct_argmax_Rvector(prod, &pi[..]);
-
+    let argmaxP = construct_argmax_spmatrix(prod, &pi[..], &P, size);
+    let argmaxR = construct_argmax_Rvector(prod, &pi[..]);
 
     let mut X: Vec<f64> = vec![0.; size * 2];
     let mut Xnew: Vec<f64> = vec![0.; size * 2];
@@ -44,7 +53,7 @@ pub fn value_iteration(prod: &MOProductMDP, w: &[f64], eps: &f64, nagents: usize
     let mut inf_indices_old: Vec<f64> = Vec::new();
     let mut unstable_count: i32 = 0;
 
-    value_for_init_policy(&mut argmaxR[..], &mut x[..], eps, &argmaxP);
+    value_for_init_policy(&argmaxR[..], &mut x[..], eps, &argmaxP);
 
     let mut pi_new: Vec<f64> = vec![-1.0; size];
     let mut q = vec![0f64; size * prod.actions.len()];
@@ -55,16 +64,16 @@ pub fn value_iteration(prod: &MOProductMDP, w: &[f64], eps: &f64, nagents: usize
         policy_stable = true;
         for (ii, a) in prod.actions.iter().enumerate() {
             // new matrix instantiation is fine
-            let mut S = P.get(a).unwrap();
-            let Pa = sparse_to_cs(&mut S);
+            let Pa = P.get(a).unwrap();
+            //let Pa = sparse_to_cs(&mut S);
             // we use the rhs matrix dim as this represents the modified state space and
             // value vector
             // Perform the operation P.x
             let mut vmv = vec![0f64; size];
-            sp_mv_multiply_f64(Pa, &x[..], &mut vmv);
+            sp_mv_multiply_f64(Pa.m, &x[..], &mut vmv);
             // Perform the operation R.w
-            let mut rmv = vec![0f64; S.nr as usize];
-            let Ra = R.get(&a).unwrap();
+            let mut rmv = vec![0f64; size as usize];
+            let Ra = prod.rewards_mat.get(&a).unwrap();
             blas_matrix_vector_mulf64(
                 &Ra.m[..],
                 &w[..],
@@ -72,11 +81,9 @@ pub fn value_iteration(prod: &MOProductMDP, w: &[f64], eps: &f64, nagents: usize
                 Ra.cols as i32,
                 &mut rmv[..]
             );
-            //println!("rmv after weighting: {:.2?}", rmv);
             assert_eq!(vmv.len(), rmv.len());
             // Perform the operation R.w + P.x
-            //println!("vmv  {:.2?}", vmv);
-            add_vecs(&rmv[..], &mut vmv[..], S.nr as i32, 1.0);
+            add_vecs(&rmv[..], &mut vmv[..], size as i32, 1.0);
             // Add the value vector to the Q table
             update_qmat(&mut q[..], &vmv[..], ii, prod.actions.len() as usize).unwrap();
         }
@@ -91,8 +98,8 @@ pub fn value_iteration(prod: &MOProductMDP, w: &[f64], eps: &f64, nagents: usize
         copy(&xtemp[..], &mut x[..], size as i32);
     }
 
-    let argmaxP = construct_argmax_spPmatrix(prod, &pi[..]);
-    let argmaxR = construct_argmax_Rmatrix(prod,  &pi[..], &R, nobjs);
+    let argmaxP = construct_argmax_spmatrix(prod, &pi[..], &P, size);
+    let argmaxR = construct_argmax_Rmatrix(prod, &pi[..], nobjs);
 
     epsilon = 1.0;
     let agent_idx = prod.agent_id as usize;
@@ -103,13 +110,13 @@ pub fn value_iteration(prod: &MOProductMDP, w: &[f64], eps: &f64, nagents: usize
             // Perform the operation argmaxP.x_k
             let mut vobjvec = vec![0f64; argmaxP.nr];
             sp_mv_multiply_f64(argmaxP.m, &X[k*size..(k+1)*size], &mut vobjvec[..]);
-            // Perform the operation R + P.x_k
+            // Perform the operation R + P.x_k}
             let R_ = if k == 0 {
                 &argmaxR.m[agent_idx*size..(agent_idx+1)*size]
             } else {
                 &argmaxR.m[task_idx*size..(task_idx+1)*size]
             };
-            add_vecs(R_, &mut vobjvec[..], size as i32, 1.0);
+            add_vecs(&R_[..], &mut vobjvec[..], size as i32, 1.0);
             copy(&vobjvec[..], &mut Xnew[k*size..(k+1)*size], size as i32);
         }
         // determine the difference between X, Xnew
@@ -126,7 +133,6 @@ pub fn value_iteration(prod: &MOProductMDP, w: &[f64], eps: &f64, nagents: usize
 
         if inf_indices.len() == inf_indices_old.len() {
             if inf_indices.iter().zip(inf_indices_old.iter()).all(|(val1, val2)| val1 == val2) {
-                //println!("eps: {} eps old: {}, inf: {:?}", epsilon, epsilon_old, inf_indices);
                 if epsilon < epsilon_old {
                     // the value function is still contracting an this is converging, therefore
                     // not unstable
@@ -140,17 +146,14 @@ pub fn value_iteration(prod: &MOProductMDP, w: &[f64], eps: &f64, nagents: usize
         } else {
             unstable_count = 0;
         }
-        //println!("{:?}", t5.elapsed().as_secs_f64());
         copy(&X[..], &mut epsold[..], obj_len);
         // Copy X <- Xnew
         copy(&Xtemp[..], &mut X[..], obj_len);
         // copy the unstable indices
         inf_indices_old = inf_indices;
         epsilon_old = epsilon;
-        //println!("X: {:.2?}", X);
     }
     if unstable_count >= UNSTABLE_POLICY {
-        //println!("inf indices: {:?}", inf_indices_old);
         for ix in inf_indices_old.iter() {
             if X[*ix as usize] < 0. {
                 X[*ix as usize] = -f32::MAX as f64;
@@ -163,7 +166,6 @@ pub fn value_iteration(prod: &MOProductMDP, w: &[f64], eps: &f64, nagents: usize
     let init_idx = prod.get_state_map().get(&prod.initial_state).unwrap();
     r[0] = X[*init_idx];
     r[1] = X[size + *init_idx];
-    //println!("Agent: {}, Task: {}, R: {:?}", prod.agent_id, prod.task_id, r);
     (pi, r)
 }
 
@@ -179,131 +181,74 @@ fn random_policy(prod: &MOProductMDP) -> Vec<f64> {
     pi
 }
 
-fn construct_spblas_matrices(prod: &MOProductMDP) -> HashMap<i32, COO> {
-    let mut sparse_matrices: HashMap<i32, COO> = HashMap::new();
+#[allow(non_camel_case_types, non_snake_case)]
+fn construct_argmax_spmatrix(
+    prod: &MOProductMDP, 
+    pi: &[f64], 
+    matrices: &HashMap<i32, SparseMatrix>,
+    size: usize
+) -> SparseMatrix {
+    // todo convert Sparse to argmaxSparse
 
-    let size = prod.states.len();
+    let mut transposes: HashMap<i32, SparseMatrixComponents> = HashMap::new();
 
     for action in prod.actions.iter() {
-        let mut r: Vec<i32> = Vec::new();
-        let mut c: Vec<i32> = Vec::new();
-        let mut vals: Vec<f64> = Vec::new();
+        let A = matrices.get(action).unwrap();
+        transposes.insert(
+            *action, 
+            deconstruct(transpose(A.m, A.nnz as i32), A.nnz, A.nr)
+        );
+    }
 
-        for state in prod.states.iter() {
-            let row_idx = prod.get_state_map().get(state).unwrap();
-            match prod.transitions.get(&(*state, *action)) {
-                None => { }
-                Some(v) => { 
-                    for (sprime, p) in v.iter() {
-                        let col_idx = prod.get_state_map().get(&sprime).unwrap();
-                        r.push(*row_idx as i32);
-                        c.push(*col_idx as i32);
-                        vals.push(*p);
-                    }
-                }
+    let mut argmax_i: Vec<i32> = Vec::new();
+    let mut argmax_j: Vec<i32> = Vec::new();
+    let mut argmax_vals: Vec<f64> = Vec::new();
+
+    for c in 0..size {
+        let matcomp = transposes.get(&(pi[c] as i32)).unwrap();
+        let p = &matcomp.p;
+        let i = &matcomp.i;
+        let x = &matcomp.x;
+        if p[c + 1] - p[c] > 0 {
+            // for each row recorder in CSS add the transpose of the coord
+            for r in p[c]..p[c+1] {
+                argmax_j.push(i[r as usize]);
+                argmax_i.push(c as i32);
+                argmax_vals.push(x[r as usize]);
             }
         }
-
-        let nnz = vals.len();
-        let S = COO {
-            nzmax: nnz as i32,
-            nr: size as i32,
-            nc: size as i32,
-            i: r,
-            j: c,
-            x: vals,
-            nz: nnz as i32
-        };
-        sparse_matrices.insert(*action, S);
     }
-    sparse_matrices
-}
 
-#[allow(non_camel_case_types, non_snake_case)]
-fn construct_argmax_spPmatrix(prod: &MOProductMDP, pi: &[f64]) -> SparseMatrix {
-    let mut r: Vec<i32> = Vec::new();
-    let mut c: Vec<i32> = Vec::new();
-    let mut vals: Vec<f64> = Vec::new();
-    
-    let size = prod.states.len();
-
-    for state in prod.states.iter() {
-        let row_idx = prod.get_state_map().get(state).unwrap();
-        let action = pi[*row_idx] as i32;
-        match prod.transitions.get(&(*state, action)) {
-            Some(v) => {
-                for (sprime, p) in v.iter() {
-                    let col_idx = prod.get_state_map().get(sprime).unwrap();
-                    r.push(*row_idx as i32);
-                    c.push(*col_idx as i32);
-                    vals.push(*p); 
-                }
-            }
-            None => { }
-        }
-    }
+    let nnz = argmax_vals.len();
 
     let T = create_sparse_matrix(
         size as i32,
         size as i32,
-        &r[..],
-        &c[..],
-        &vals[..]
+        &argmax_i[..],
+        &argmax_j[..],
+        &argmax_vals[..]
     );
+
     let A = convert_to_compressed(T);
     SparseMatrix {
         m: A,
         nr: size,
         nc: size,
-        nnz: vals.len()
+        nnz: nnz
     }
 }
 
-#[allow(non_snake_case)]
-fn construct_rewards_matrices(prod: &MOProductMDP, nagents: usize, nobjs: usize) -> HashMap<i32, DenseMatrix> {
-    let mut rewards: HashMap<i32, DenseMatrix> = HashMap::new();
-    let size: usize = prod.states.len();
-    let agent_idx: usize = prod.agent_id as usize;
-    let task_idx: usize = nagents + prod.task_id as usize;
-    for action in prod.actions.iter() {
-        let mut R: Vec<f64> = vec![-f32::MAX as f64; size * nobjs];
-        for state in prod.states.iter() {
-            let row_idx = prod.get_state_map().get(state).unwrap();
-            match prod.rewards.get(&(*state, *action)) {
-                Some(r) => {
-                    for a in 0..nobjs {
-                        R[a * size + *row_idx] = 0.;
-                    }
-                    R[agent_idx * size + *row_idx] = r[0];
-                    R[task_idx * size + *row_idx] = r[1];
-                }
-                None => { }
-            }
-        }
-        rewards.insert(*action, DenseMatrix {
-            m: R,
-            rows: size,
-            cols: nobjs
-        });
-    }
-    rewards
-}
-
-#[allow(non_snake_case)]
 fn construct_argmax_Rmatrix(
     prod: &MOProductMDP, 
     pi: &[f64], 
-    rmatricies: &HashMap<i32, DenseMatrix>,
     nobjs: usize
 ) -> DenseMatrix {
     let size = prod.states.len();
     let mut R: Vec<f64> = vec![0.; size * nobjs];
-    for state in prod.states.iter() {
-        let row_idx = prod.get_state_map().get(state).unwrap();
-        let action = pi[*row_idx] as i32;
-        let rewards = rmatricies.get(&action).unwrap();
+    for r in 0..size {
+        let rewards = prod.rewards_mat.get(&(pi[r] as i32)).unwrap();
         for c in 0..nobjs {
-            R[c * size + *row_idx] = rewards.m[c * size + *row_idx]; 
+            R[c * size + r] = rewards.m[c * size + r]; 
         }
     }
     DenseMatrix {
@@ -313,25 +258,19 @@ fn construct_argmax_Rmatrix(
     }
 }
 
-#[allow(non_snake_case)]
 fn construct_argmax_Rvector(prod: &MOProductMDP, pi: &[f64]) -> Vec<f64> {
     let size = prod.states.len();
+    let agent_idx = prod.agent_id as usize;
     let mut R: Vec<f64> = vec![0.; size];
-    for state in prod.states.iter() {
-        let row_idx = prod.get_state_map().get(state).unwrap();
-        let action = pi[*row_idx] as i32;
-        match prod.rewards.get(&(*state, action)) {
-            Some(r) => {
-                R[*row_idx] = r[0];
-            }
-            None => { }
-        }
+    for r in 0..size {
+        let Ra = prod.rewards_mat.get(&(pi[r] as i32)).unwrap();
+        R[r] = Ra.m[agent_idx * size + r];
     }
     R
 }
 
 fn value_for_init_policy(
-    R: &mut [f64], 
+    R: &[f64], 
     x: &mut [f64], 
     eps: &f64, 
     argmaxP: &SparseMatrix
@@ -346,8 +285,9 @@ fn value_for_init_policy(
     while (epsilon > *eps) && (unstable_count < UNSTABLE_POLICY) {
         let mut vmv = vec![0f64; argmaxP.nr];
         sp_mv_multiply_f64(argmaxP.m, &x[..], &mut vmv[..]);
-        add_vecs(&mut R[..], &mut vmv[..], argmaxP.nr as i32, 1.0);
+        add_vecs(&R[..], &mut vmv[..], argmaxP.nr as i32, 1.0);
         copy(&vmv[..], &mut xnew[..argmaxP.nr], argmaxP.nr as i32);
+        //println!("vmv: {:?}", vmv);
         add_vecs(&xnew[..], &mut x[..], argmaxP.nc as i32, -1.0);
         epsilon = max_eps(&x[..]);
         inf_indices = x[..argmaxP.nr].iter()
@@ -450,9 +390,6 @@ pub fn print_rewards_matrices(
     blas_rewards_matrices: &HashMap<i32, DenseMatrix>,
     state_map: &HashMap<usize, (i32, i32)>,
     actions: &[i32],
-    // states: &[(i32, i32)],
-    agent: i32,
-    task: i32
 ) {
     for action in actions.iter() {
         let m = blas_rewards_matrices.get(action).unwrap();
