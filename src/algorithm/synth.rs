@@ -83,7 +83,7 @@ pub fn alloc_dfs(model: &SCPM, policy: Vec<f64>) -> Vec<GridState> {
 
 
 pub fn scheduler_synthesis(model: &SCPM, w: &[f64], eps: &f64, t: &[f64], prods_: Vec<MOProductMDP>) 
--> (Vec<HashMap<(i32, i32), Vec<f64>>>, Vec<(i32, i32, i32, Vec<f64>)>, Vec<f64>) {
+-> (Vec<HashMap<(i32, i32), Vec<f64>>>, Vec<(i32, i32, i32, Vec<f64>)>, Vec<f64>, usize) {
     let t1 = Instant::now();
     //let torig = t.to_vec();
     //println!("initial w: {:.3?}", w);
@@ -244,5 +244,5 @@ pub fn scheduler_synthesis(model: &SCPM, w: &[f64], eps: &f64, t: &[f64], prods_
         }
     }
     println!("Time: {:.3}", t1.elapsed().as_secs_f32());
-    (schedulers, allocation_acc, tnew)
+    (schedulers, allocation_acc, tnew, count)
 }

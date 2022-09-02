@@ -12,8 +12,9 @@ pub mod lp;
 use std::hash::Hash;
 use std::mem;
 use pyo3::prelude::*;
+use pyo3::exceptions::PyValueError;
 use hashbrown::HashMap;
-use scpm::model::{build_model, SCPM, MOProductMDP};
+use scpm::model::{SCPM, MOProductMDP};
 use algorithm::synth::{process_scpm, scheduler_synthesis};
 use agent::agent::{Agent, Team};
 use dfa::dfa::{DFA, Mission, json_deserialize_from_string};
@@ -342,10 +343,37 @@ fn solver(hullset: Vec<Vec<f64>>, t: Vec<f64>, nobjs: usize) -> Result<Vec<f64>,
     let solver_script_call = include_str!("lp/pylp.py");
     let result: Vec<f64> = Python::with_gil(|py| -> PyResult<Vec<f64>> {
         let lpsolver = PyModule::from_code(py, solver_script_call, "", "")?;
-        let solver_result = lpsolver.getattr("hyperplane_solver")?.call1((hullset, t, nobjs,))?.extract()?;
+        let solver_result = lpsolver.getattr("hyperplane_solver")?.call1(
+            (hullset, t, nobjs,)
+        )?.extract()?;
         Ok(solver_result)
     }).unwrap();
     Ok(result)
+}
+
+fn random_sched(
+    alloc: Vec<(i32, i32, i32, Vec<f64>)>, 
+    t: Vec<f64>, 
+    l: usize, 
+    m: usize, 
+    n: usize
+) -> Option<Vec<f64>> {
+    let script_call = include_str!("lp/pylp.py");
+    let result: Result<Vec<f64>, PyErr> = Python::with_gil(|py| -> PyResult<Vec<f64>> {
+        let lpsolver = PyModule::from_code(py, script_call, "", "")?;
+        let solver_result = lpsolver.getattr("randomised_scheduler")?.call1((
+            alloc,
+            t,
+            l, 
+            m, 
+            n
+        ))?.extract()?;
+        Ok(solver_result)
+    });
+    match result {
+        Ok(r) => { return Some(r) }
+        Err(e) => { println!("Err: {:?}", e); return None }
+    }
 }
 
 fn new_target(
@@ -411,15 +439,27 @@ fn meta_scheduler_synthesis(
     w: Vec<f64>, 
     eps: f64, 
     target: Vec<f64>
-) {
+) -> PyResult<(Vec<f64>, usize)> {
     let prods = model.construct_products();
-    let (_pis, alloc, _t_new) = scheduler_synthesis(model, &w[..], &eps, &target[..], prods);
+    let (_pis, alloc, t_new, l) = scheduler_synthesis(model, &w[..], &eps, &target[..], prods);
     //println!("{:?}", pis);
-    println!("alloc: \n{:.3?}", alloc);
+    //println!("alloc: \n{:.3?}", alloc);
     // convert output schedulers to 
     // we need to construct the randomised scheduler here, then the output from the randomised
     // scheduler, which will already be from a python script, will be the output of this function
-    // also
+    let weights = random_sched(alloc, t_new.to_vec(), l, model.tasks.size, model.agents.size);
+    match weights {
+        Some(w) => { return Ok((w, l)) }
+        None => { 
+            return Err(PyValueError::new_err(
+                format!(
+                    "Randomised scheduler weights could not be found for 
+                    target vector: {:?}", 
+                    t_new)
+                )
+            )
+        }
+    }
 }
 
 /// A Python module implemented in Rust.

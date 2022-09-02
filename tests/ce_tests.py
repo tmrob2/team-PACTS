@@ -1,8 +1,9 @@
 import ce
 import random
+import numpy as np
 
-NUM_AGENTS = 2
-NUM_TASKS = 10
+NUM_AGENTS = 3
+NUM_TASKS = 3
 
 def transition_map(agent, seed, mu, std):
     # generate the transition with some random probability to simulate 
@@ -69,22 +70,21 @@ for i in range(0, NUM_AGENTS):
     team.add_agent(agent)
 
 if __name__ == "__main__":
-    #print(f"Rust calc sum: (5, 20) = {ce.sum_as_string(5, 20)}")
-    #initial_state = (0, 0)
-    # test creating the product mdp
-    #print("Testing task 0")
-    #product_mdp = ce.build_model(
-    #    initial_state, agent, mission.get_task(0), 0, 0, NUM_AGENTS, NUM_AGENTS + NUM_TASKS
-    #)
-    #product_mdp.print_transitions()
-    #product_mdp.print_rewards()
-    
     scpm = ce.SCPM(team, mission)
     #w = [0] * NUM_AGENTS + [1 / NUM_TASKS] * NUM_TASKS
     #ce.vi_test(product_mdp, w, NUM_AGENTS, NUM_TASKS)
     w = [1 / (NUM_AGENTS + NUM_TASKS)] * ( NUM_AGENTS + NUM_TASKS )
     #w = [0, 0, 0.5, 0.5]
     #scpm.print_transitions()
-    target = [-7] * NUM_AGENTS + [0.97] * NUM_TASKS 
-    ce.scheduler_synthesis(scpm, w, 0.0001, target)
-    #ce.alloc_test(scpm, w, 0.0001)
+    target = [-5.0] * NUM_AGENTS + [0.97] * NUM_TASKS 
+    done = False
+    while not done:
+        try:
+            weights, l = ce.scheduler_synthesis(scpm, w, 0.0001, target)
+            print(np.array(weights).reshape([NUM_TASKS, l]))
+            done = True
+        except:
+            print("Got error on generating scheduler synthesis")
+            target = [target[i] - 2 if i < NUM_AGENTS else target[i] for i in range(NUM_AGENTS + NUM_TASKS) ]
+            print(target)
+

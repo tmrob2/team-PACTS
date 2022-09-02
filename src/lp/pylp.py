@@ -52,5 +52,46 @@ def eucl_new_target(X, W, t, l, n):
     return z.value
 
 
-def radomised_scheduler():
-    pass
+def randomised_scheduler(r, t, l, m, n):
+    model = LpProblem("NoName", LpMinimize)
+    solver = CPLEX_CMD(path=cplex_dir, msg=False)
+    c_dict = {}
+    p_dict = {}
+    I = set([])
+
+    # convert r to a dictionary
+    # we also have to collect the set of I, J, K here as well
+    for (k, i, j, r) in r:
+        c_dict[f"{i}_{j}_{k}"] = r[0]
+        if f"{j}_{k}" not in p_dict.keys():
+            p_dict[f"{j}_{k}"] = r[1]
+        else:
+            p_dict[f"{j}_{k}"] += r[1]
+            
+    # Define the decision variables
+    v = {f"{j}_{k}": LpVariable(name=f"v{j}_{k}", lowBound=0., upBound=1.) 
+            for j in range(m) for k in range(l)}
+
+    for i in range(n):
+        sum_var = []
+        for j in range(m):
+            for k in range(l):
+                if f"{i}_{j}_{k}" in c_dict.keys():
+                    sum_var.append(v[f"{j}_{k}"] * c_dict[f"{i}_{j}_{k}"])
+        model += lpSum(sum_var) >= t[i]
+
+    for j in range(m):
+        model += lpSum([v[f"{j}_{k}"]*p_dict[f"{j}_{k}"] for k in range(l)]) >= t[n + j]
+    
+    for j in range(m):
+        model += lpSum([v[f"{j}_{k}"] for k in range(l)]) == 1
+
+    model += 0
+
+    #print(model)
+
+    status = model.solve(solver)
+    #print(status)
+    solution = [value(v[f"{j}_{k}"]) for j in range(m) for k in range(l)]
+    return solution
+
