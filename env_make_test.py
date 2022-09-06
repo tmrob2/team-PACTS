@@ -128,6 +128,12 @@ if __name__ == "__main__":
     # get the first action from the policy
     #for agent in range(NUM_AGENTS):
     # pop the first task from the allocation
+    # Initialise Q
+
+    #
+    # This is actually the code which will go into the executor script
+    #
+    Q = [0] * NUM_TASKS
     tasks = {i: None for i in range(NUM_AGENTS)}
     for i in range(NUM_AGENTS):
         if task_alloc[i]:
@@ -135,7 +141,12 @@ if __name__ == "__main__":
 
     print("tasks: ", tasks)
     actions = [-1, -1]
+
+    # We need something like current tasks to keep track of the tasks being executed
+
     for idx in range(NUM_AGENTS):
+        # There is a problem here because I don't think that outputs can be serialized
+        # but the executor needs to run on another thread
         sidx = outputs.get_index((obs[idx]["a"], obs[idx]["c"], env.agent_rack_position[idx]))
         print("sidx", sidx)
         # get the index from the new state
@@ -153,5 +164,13 @@ if __name__ == "__main__":
         print("actions update: ", actions)
     obs, rewards, dones, info = env.step(actions)
     print("New Obs: ", obs)
+
+    # Now we need to get the next DFA step for both of the tasks
+    # First get the word for the new observations 
+    words = []
+    for idx in range(NUM_AGENTS):
+        j = tasks[idx][0]
+        word = env.label(Q[j], idx, rack_tasks, j, feedpoints[j])
+        print(f"New word for agent: {idx} q, s': {obs[idx]} is {word}")
         
         
