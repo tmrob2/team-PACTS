@@ -248,7 +248,7 @@ class Warehouse(gym.Env):
                 word = ""
                 v.append((new_obs, 1.0, word))
             else:
-                raise(f"Action not registered")
+                raise("Action not registered")
 
             # at this point we need to choose a new state based on the probs
             # in v
