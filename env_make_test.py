@@ -140,6 +140,7 @@ if __name__ == "__main__":
         # get the index from the new state
         print(f"task {idx} -> {tasks[idx]}")
         actions = [-1, -1]
+        print(f"dealing with task: {task[idx]}")
         if tasks[idx] is not None:
             k = tasks[idx][1]
             j = tasks[idx][0]
