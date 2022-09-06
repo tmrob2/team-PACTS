@@ -5,6 +5,7 @@ import random
 import numpy as np
 import random
 import json
+import logging
 
 NUM_AGENTS = 2
 NUM_TASKS = 2
@@ -22,7 +23,8 @@ env = gym.make(
     feedpoints=feedpoints,
     render_mode=None,
     xsize=xsize,
-    ysize=ysize
+    ysize=ysize,
+    diable_env_checker=True
 )
 
 obs = env.reset()
@@ -136,9 +138,8 @@ if __name__ == "__main__":
         sidx = outputs.get_index((obs[idx]["a"], obs[idx]["c"], env.agent_rack_position[idx]))
         print("sidx", sidx)
         # get the index from the new state
-        print(f"task {idx} -> {tasks[i]}")
+        print(f"task {idx} -> {tasks[idx]}")
         actions = [6, 6]
-        print(f"{tasks[idx]}")
         if tasks[idx]:
             k = tasks[idx][1]
             j = tasks[idx][0]
