@@ -139,8 +139,8 @@ if __name__ == "__main__":
         print("sidx", sidx)
         # get the index from the new state
         print(f"task {idx} -> {tasks[idx]}")
-        actions = [6, 6]
-        if tasks[idx]:
+        actions = [-1, -1]
+        if tasks[idx] is not None:
             k = tasks[idx][1]
             j = tasks[idx][0]
             pi = pis[k][(idx, j)]
