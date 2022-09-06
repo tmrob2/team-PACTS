@@ -15,9 +15,9 @@ use std::mem;
 use pyo3::prelude::*;
 //use pyo3::exceptions::PyValueError;
 use hashbrown::HashMap;
-use scpm::model::{SCPM, MOProductMDP};
-use algorithm::synth::{process_scpm, scheduler_synthesis};
-use envs::dp_warehouse_setup::{test_prod, test_scpm, warehouse_scheduler_synthesis};
+use scpm::model::{SCPM}; // , MOProductMDP};
+//use algorithm::synth::{process_scpm, scheduler_synthesis};
+use envs::dp_warehouse_setup::{test_prod, test_scpm, warehouse_scheduler_synthesis, place_racks, MDPOutputs};
 //use agent::agent::{MDP};
 use dfa::dfa::{DFA, Mission, json_deserialize_from_string};
 //use parallel::{threaded::process_mdps};
@@ -25,7 +25,7 @@ use c_binding::suite_sparse::*;
 extern crate blis_src;
 extern crate cblas_sys;
 use cblas_sys::{cblas_dcopy, cblas_dgemv, cblas_dscal, cblas_ddot};
-use algorithm::dp::value_iteration;
+//use algorithm::dp::value_iteration;
 use float_eq::float_eq;
 use std::fs;
 
@@ -465,6 +465,7 @@ fn ce(_py: Python, m: &PyModule) -> PyResult<()> {
     //m.add_class::<MDP>()?;
     m.add_class::<DFA>()?;
     m.add_class::<Mission>()?;
+    m.add_class::<MDPOutputs>()?;
     //m.add_class::<Team>()?;
     m.add_class::<SCPM>()?;
     //m.add_function(wrap_pyfunction!(build_model, m)?)?;
@@ -472,6 +473,7 @@ fn ce(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(test_prod, m)?)?;
     m.add_function(wrap_pyfunction!(warehouse_scheduler_synthesis, m)?)?;
     m.add_function(wrap_pyfunction!(json_deserialize_from_string, m)?)?;
+    m.add_function(wrap_pyfunction!(place_racks, m)?)?;
     //m.add_function(wrap_pyfunction!(process_scpm, m)?)?;
     m.add_function(wrap_pyfunction!(test_scpm, m)?)?;
     Ok(())

@@ -3,7 +3,7 @@ use crate::scpm::model::{SCPM, build_model};
 use crate::algorithm::synth::{process_scpm, scheduler_synthesis};
 use crate::dfa::dfa::{DFA, ProcessAlphabet};
 use crate::algorithm::dp::value_iteration;
-use crate::random_sched;
+use crate::{random_sched};
 use hashbrown::{HashMap, HashSet};
 use serde::{Serialize, Deserialize};
 use serde_json;
@@ -244,23 +244,53 @@ where MDP<State, Data<'a>>: Env<State> {
     }
 }
 
-fn place_racks(xsize: usize, ysize: usize) 
+#[pyfunction]
+pub fn place_racks(xsize: usize, ysize: usize) 
 -> HashSet<(i8, i8)> {
     let mut racks: HashSet<(i8, i8)> = HashSet::new();
     let mut count: usize = 0;
     assert!(xsize > 5);
     assert!(ysize > 4);
     for c in 2..xsize - 2 {
-        for r in 1..ysize - 2 {
-            if count < 2 {
-                count += 1;
+        if count < 2 {
+            for r in 1..ysize - 2 { 
                 racks.insert((r as i8, c as i8));
-            } else {
-                count = 0;
             }
+            count += 1;
+        } else {
+            count = 0;
         }
     }
     racks
+}
+
+#[pyclass]
+#[derive(Clone)]
+pub struct MDPOutputs {
+    pub state_map: HashMap<State, i32>,
+    pub rev_state_map: HashMap<i32, State>
+}
+
+#[pymethods]
+impl MDPOutputs {
+    #[new]
+    pub fn new() -> MDPOutputs {
+        MDPOutputs {
+            state_map: HashMap::new(),
+            rev_state_map: HashMap::new()
+        }
+    }
+
+    pub fn get_index(&self, state: State) -> i32 {
+        *self.state_map.get(&state).unwrap()
+    }
+}
+
+impl MDPOutputs {
+    pub fn store_maps(&mut self, state_map: HashMap<State, i32>, rev_state_map: HashMap<i32, State>) {
+        self.state_map = state_map;
+        self.rev_state_map = rev_state_map;
+    }
 }
 
 #[pyfunction]
@@ -274,14 +304,20 @@ pub fn warehouse_scheduler_synthesis(
     ysize: usize,
     initial_states: Vec<(i8, i8)>,  // refers to the agent grid state
     feedpoints: Vec<(i8, i8)>,
-    rack_tasks: Vec<(i8, i8)>
-) -> PyResult<(Vec<f64>, usize, HashMap<usize, HashMap<(i32, i32), Vec<f64>>>)> {
+    racks: HashSet<(i8, i8)>,
+    rack_tasks: Vec<(i8, i8)>,
+    mut outputs: MDPOutputs
+) -> PyResult<(
+        Vec<f64>, 
+        usize, 
+        HashMap<usize, HashMap<(i32, i32), Vec<f64>>>,
+        MDPOutputs
+    )> {
     // construct the product MDPs
     let t1 = Instant::now();
     let mut rnd = ChaCha8Rng::seed_from_u64(1234);
     println!("Constructing MDP of agent environment");
     let init_state: State = ((0, 0), 0, None);
-    let racks = place_racks(xsize, ysize);
     let mut action_to_dir: HashMap<u8, (i8, i8)> = HashMap::new();
     let dirs = vec![(0,(1, 0)),(1, (0, 1)),(2,(-1, 0)),(3,(0, -1))];
     for (k, v) in dirs.iter() {
@@ -308,8 +344,10 @@ pub fn warehouse_scheduler_synthesis(
     // we need to construct the randomised scheduler here, then the output from the randomised
     // scheduler, which will already be from a python script, will be the output of this function
     let weights = random_sched(alloc, t_new.to_vec(), l, model.tasks.size, model.num_agents);
+    outputs.state_map = mdp.state_map;
+    outputs.rev_state_map = mdp.reverse_state_map;
     match weights {
-        Some(w) => { return Ok((w, l, pis)) }
+        Some(w) => { return Ok((w, l, pis, outputs)) }
         None => { 
             return Err(PyValueError::new_err(
                 format!(

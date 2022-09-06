@@ -8,7 +8,7 @@ import gym
 import random
 
 class Warehouse(gym.Env):
-    metadata = {"render_modes": ["human", "rgb_array", "single_rgb_array"], "render_fps": 4}
+    metadata = {"render_modes": ["human", "rgb_array", "single_rgb_array"], "render_fps": 20}
 
     def __init__(
         self, 
@@ -50,7 +50,7 @@ class Warehouse(gym.Env):
         #self._rack_positions = dp_warehouse.place_racks(size, size) # is a set
 
         # there are four actions, corresponding to "right", "up", "left", "down"
-        self.action_space = spaces.Discrete(6)
+        self.action_space = spaces.Discrete(7)
 
         """
         The following dictionary maps abstract actions from self.action_space to 
@@ -82,7 +82,19 @@ class Warehouse(gym.Env):
         self.renderer = Renderer(self.render_mode, self._render_frame)
 
         self.racks = set([])
+        self._place_racks()
         self.agent_rack_position = {i: None for i in range(nagents)}
+        self.agent_orig_rack_position = {i: None for i in range(nagents)}
+
+    def _place_racks(self):
+        count = 0
+        for c in range(2, self.xsize - 2):
+            if count < 2:
+                for r in range(2, self.ysize - 2):
+                    self.racks = self.racks | set([(c, r)])
+                count += 1
+            else:
+                count = 0
 
     def label(self):
         """
@@ -111,7 +123,6 @@ class Warehouse(gym.Env):
     
     def step(self, action: List): # action list will come directly from a policy 
         # the current state is self.state
-        direction = self._action_to_direction[action]
         observations = {}
         rewards = []
         dones = []
@@ -121,6 +132,8 @@ class Warehouse(gym.Env):
             v = []
 
             agent_obs_i = self.agent_obs[i]
+            agent_r_i = self.agent_rack_position[i]
+            print(f"agent[{i}] obs: {agent_obs_i}")
             if action[i] in [0, 1, 2, 3]:
                 # this is a directional movement, 
                 # agents can move freely if they're not carrying anything
@@ -131,10 +144,10 @@ class Warehouse(gym.Env):
                 # The agent is not carrying something
                 direction = self._action_to_direction[action[i]]
                 agent_loc = agent_obs_i["a"]
-                new_loc = np.clip(agent_loc + direction, 9, self.xsize-1)
+                new_loc = np.clip(agent_loc + direction, 0, self.xsize-1)
                 if carrying == 0:
                     # the agent is free to move in any direction
-                    new_obs = {"a": new_loc, "c": carrying, "r": agent_obs_i["r"]}
+                    new_obs = {"a": new_loc, "c": carrying, "r": agent_r_i}
                     # now we need to determine the word
                     word = ""
                     v.append((new_obs, 1.0, word))
@@ -145,10 +158,10 @@ class Warehouse(gym.Env):
 
                     # define two situations 
                     
-                    if agent_obs_i["a"] in self.racks:
-                        if new_loc in self.racks:
+                    if (int(agent_obs_i["a"][0]), int(agent_obs_i["a"][1])) in self.racks:
+                        if (int(new_loc[0]), int(new_loc[1])) in self.racks:
                             # then the agent may not move
-                            new_obs = agent_obs_i
+                            new_obs = {"a": agent_obs_i["a"], "c": agent_obs_i["c"], "r": agent_r_i}
                             word = "" # the word is the current word as the state will not change
                             v.append((new_obs, 1.0, word))
                         else:
@@ -162,7 +175,7 @@ class Warehouse(gym.Env):
                             # the agent fails to move the rack to the new position
                             # effectively dropping the rack
                             word_succ = ""
-                            fail_obs = {"a": new_loc, "c": 0, "r": agent_obs_i["r"]}
+                            fail_obs = {"a": new_loc, "c": 0, "r": agent_r_i}
                             word_fail = ""
                             v.append((succ_obs, 0.99, word_succ))
                             v.append((fail_obs, 0.01, word_fail))
@@ -171,40 +184,69 @@ class Warehouse(gym.Env):
                         # the agent fails to move the rack to the new position
                         # effectively dropping the rack
                         word_succ = ""
-                        fail_obs = {"a": new_loc, "c": 0, "r": agent_obs_i["r"]}
+                        fail_obs = {"a": new_loc, "c": 0, "r": agent_r_i}
                         word_fail = ""
                         v.append((succ_obs, 0.99, word_succ))
                         v.append((fail_obs, 0.01, word_fail))
-            elif action == 4:
+            elif action[i] == 4:
                 # pickup a rack if the agent and rack coincide or the agent is
                 # at a rack position
                 if agent_obs_i["c"] == 0:
                     # if the agent is in a rack position then it may carry a rack
-                    if agent_obs_i["a"] in self.racks:
-                        new_obs = {"a": agent_obs_i["a"], "c": 1, "r": agent_obs_i["a"]}
-                        word = ""
-                        v.push((new_obs, 1.0, word))
+                    # chack that there is not a rack out of place on the floor 
+                    # due to an agent dropping a rack
+                    if self.agent_rack_position[i] is not None:
+                        if all(np.equal(agent_r_i, agent_obs_i["a"])):
+                            print(f"Agent {i} picked up a rack")
+                            # this is fine this means that the agent will pick up
+                            # a rack that is out of position
+                            new_obs = {"a": agent_obs_i["a"], "c": 1, "r": agent_obs_i["a"]}
+                            word = ""
+                            v.append((new_obs, 1.0, word))
+                        else:
+                            # if an agent isn't 
+                            new_obs = {"a": agent_obs_i["a"], "c": agent_obs_i["c"], "r": agent_r_i}
+                            word = ""
+                            v.append((new_obs, 1.0, word))
                     else:
-                        new_obs = agent_obs_i
-                        word = ""
-                        v.push((new_obs, 1.0, word))
+                        if (int(agent_obs_i["a"][0]), int(agent_obs_i["a"][1])) in self.racks:
+                            print(f"Agent {i} picked up a rack")
+                            new_obs = {"a": agent_obs_i["a"], "c": 1, "r": agent_obs_i["a"]}
+                            word = ""
+                            self.agent_orig_rack_position[i] = agent_obs_i["a"]
+                            v.append((new_obs, 1.0, word))
+                        else:
+                            new_obs = {"a": agent_obs_i["a"], "c": agent_obs_i["c"], "r": agent_r_i}
+                            word = ""
+                            v.append((new_obs, 1.0, word))
                 else:
                     # The agent is already carrying something and therefore canno pickup 
                     # something else
-                    new_obs = agent_obs_i
+                    new_obs = {"a": agent_obs_i["a"], "c": agent_obs_i["c"], "r": agent_r_i}
                     word = ""
-                    v.push((new_obs, 1.0, word))
-            elif action == 5:
+                    v.append((new_obs, 1.0, word))
+            elif action[i] == 5:
                 # drop a rack anywhere if the agent is carrying a rack
                 if agent_obs_i["c"] == 1:
-                    new_obs = {"a": agent_obs_i["a"], "c": 0, "r": None}
-                    word = ""
-                    v.push((new_obs, 1.0, word))
+                    if all(np.equal(agent_r_i, self.agent_orig_rack_position[i])):
+                        new_obs = {"a": agent_obs_i["a"], "c": 0, "r": agent_obs_i["a"]}
+                        self.agent_orig_rack_position[i] = None
+                        self.agent_rack_position[i] = None
+                        word = ""
+                        v.append((new_obs, 1.0, word))
+                    else:
+                        new_obs = {"a": agent_obs_i["a"], "c": agent_obs_i["c"], "r": agent_r_i}
+                        word = ""
+                        v.append((new_obs, 1.0, word))
                 else:
                     # The agent is not carrying anything and therefore cannot drop anything
-                    new_obs = agent_obs_i
+                    new_obs = {"a": agent_obs_i["a"], "c": agent_obs_i["c"], "r": agent_r_i}
                     word = ""
-                    v.push((new_obs, 1.0, word))
+                    v.append((new_obs, 1.0, word))
+            elif action[i] == 7:
+                new_obs = {"a": agent_obs_i["a"], "c": agent_obs_i["c"], "r": agent_r_i}
+                word = ""
+                v.append((new_obs, 1.0, word))
             else:
                 raise("Action not registered")
 
@@ -214,12 +256,13 @@ class Warehouse(gym.Env):
             indices = list(range(len(v)))
             ind = random.choices(indices, probs) 
             # with ind return the observation, reward, and done
-            observations[i] = {"a": v[ind][0]["a"], "c": v[ind][0]["c"]}
-            self.agent_rack_position[i] = v[ind][0]["r"]
+            observations[i] = {"a": v[ind[0]][0]["a"], "c": v[ind[0]][0]["c"]}
+            self.agent_obs[i] = observations[i]
+            self.agent_rack_position[i] = v[ind[0]][0]["r"]
             rewards.append(-1)
             dones.append(False)
             self.renderer.render_step()
-            info = {"prob": v[ind][1], "word": v[ind][2]}
+            info = {"prob": v[ind[0]][1], "word": v[ind[0]][2]}
 
         return observations, rewards, dones, info
 
@@ -245,22 +288,58 @@ class Warehouse(gym.Env):
         for floc in self.feedpoints:
             pygame.draw.rect(
                 canvas,
-                (255, 0 ,0),
+                (0, 255 ,0),
                 pygame.Rect(
-                    pix_square_size * floc,
+                    pix_square_size * np.array(floc, dtype=np.int64),
                     (pix_square_size, pix_square_size)
                 ),
             )
+        
+
+        # if an agent is carrying a rack draw this rack first
+        for ag in range(self.nagents):
+            if self.agent_rack_position[ag] is not None:
+                arack = self.agent_rack_position[ag]
+                pygame.draw.rect(
+                    canvas,
+                    (0, 0 ,255),
+                    pygame.Rect(
+                        pix_square_size * np.array(arack, dtype=np.int64) + 0.1 * pix_square_size,
+                        (pix_square_size - 0.2 * pix_square_size, pix_square_size - 0.2 * pix_square_size)
+                    ),
+                )
+        for r in self.racks:
+            pygame.draw.rect(
+                canvas,
+                (0, 0 ,255),
+                pygame.Rect(
+                    pix_square_size * np.array(r, dtype=np.int64) + 0.1 * pix_square_size,
+                    (pix_square_size - 0.2 * pix_square_size, pix_square_size - 0.2 * pix_square_size)
+                ),
+            )
+        for ag in range(self.nagents):
+            if self.agent_orig_rack_position[ag] is not None:
+                if not all(np.equal(self.agent_rack_position[ag],self.agent_orig_rack_position[ag])):
+                    r = self.agent_orig_rack_position[ag]
+                    pygame.draw.rect(
+                        canvas,
+                        (255, 255 ,255),
+                        pygame.Rect(
+                            pix_square_size * np.array(r, dtype=np.int64) + 0.1 * pix_square_size,
+                            (pix_square_size - 0.2 * pix_square_size, pix_square_size - 0.2 * pix_square_size)
+                        ),
+                    )
+                    
         
         # draw each of the agents as a circle
         for ag in range(self.nagents):
             pygame.draw.circle(
                 canvas,
-                (0, 255, 0),
-                (self.agent_obs[ag]["a"] + 0.5) * pix_square_size,
+                (255, 0, 0),
+                (np.array(self.agent_obs[ag]["a"], dtype=np.int64) + 0.5) * pix_square_size,
                 pix_square_size / 3
             )
-        
+
         # Add some grid lines
         for x in range(self.xsize + 1):
             pygame.draw.line(
@@ -268,14 +347,14 @@ class Warehouse(gym.Env):
                 0,
                 (0, pix_square_size * x),
                 (self.window_size, pix_square_size * x),
-                width=3,
+                width=1,
             )
             pygame.draw.line(
                 canvas,
                 0,
                 (pix_square_size * x, 0),
                 (pix_square_size * x, self.window_size),
-                width=3,
+                width=1,
             )
         if mode == "human":
             assert self.window is not None

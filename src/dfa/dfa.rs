@@ -21,7 +21,8 @@ pub struct DFA {
     pub rejecting: Vec<i32>,
     #[pyo3(get)]
     pub done: Vec<i32>,
-    pub transitions: Vec<(i32, String, i32)>
+    pub transitions: Vec<(i32, String, i32)>,
+    current_state: i32,
 }
 
 #[pymethods]
@@ -41,7 +42,8 @@ impl DFA {
             accepting, 
             rejecting, 
             done, 
-            transitions: Vec::new()
+            transitions: Vec::new(),
+            current_state: 0
         }
     }
 
@@ -49,6 +51,14 @@ impl DFA {
         if !self.transitions.contains(&(q, w.to_string(), qprime)) {
             self.transitions.push((q, w, qprime));
         }
+    }
+
+    fn next(&mut self, state: i32, word: String) -> i32 {
+        let qprime = self.transitions.iter()
+            .filter(|(q, w, qprime)| *q == state && w == &word)
+            .map(|(q, w, qprime)| *qprime).collect::<Vec<i32>>()[0];
+        self.current_state = qprime;
+        qprime
     }
 
     fn clone(&self) -> Self {
@@ -59,7 +69,8 @@ impl DFA {
             accepting: self.accepting.to_vec(), 
             rejecting: self.rejecting.to_vec(), 
             done: self.done.to_vec(), 
-            transitions: self.transitions.clone()
+            transitions: self.transitions.clone(),
+            current_state: 0
         }
     }
 
