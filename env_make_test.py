@@ -137,7 +137,8 @@ if __name__ == "__main__":
         print("sidx", sidx)
         # get the index from the new state
         print(f"task {idx} -> {tasks[i]}")
-        actions = [-1, -1]
+        actions = [6, 6]
+        print(f"{tasks[idx]}")
         if tasks[idx]:
             k = tasks[idx][1]
             j = tasks[idx][0]
