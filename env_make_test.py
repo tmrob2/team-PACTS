@@ -24,7 +24,7 @@ env = gym.make(
     render_mode=None,
     xsize=xsize,
     ysize=ysize,
-    diable_env_checker=True
+    disable_env_checker=True
 )
 
 obs = env.reset()
