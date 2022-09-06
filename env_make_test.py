@@ -169,8 +169,12 @@ if __name__ == "__main__":
     # First get the word for the new observations 
     words = []
     for idx in range(NUM_AGENTS):
-        j = tasks[idx][0]
-        word = env.label(Q[j], idx, rack_tasks, j, feedpoints[j])
-        print(f"New word for agent: {idx} q, s': {obs[idx]} is {word}")
+        if tasks[idx] is not None:
+            j = tasks[idx][0]
+            word = env.label(Q[j], idx, rack_tasks, j, feedpoints[j])
+            print(f"New word for agent: {idx} q, s': {obs[idx]} is {word}")
+        else:
+            #What is the default word?
+            print("Default word is 'a'")
         
         
