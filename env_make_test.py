@@ -150,6 +150,6 @@ if __name__ == "__main__":
         else:
             print(f"Agent {idx} state: {(obs[idx]['a'], obs[idx]['c'], env.agent_rack_position[idx])} -> idx: {sidx}, action: {6}")
             actions[idx] = 6
-        obs, rewards, dones, info = env.step(actions)
+    obs, rewards, dones, info = env.step(actions)
         
         
