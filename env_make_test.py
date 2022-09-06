@@ -152,5 +152,6 @@ if __name__ == "__main__":
             actions[idx] = 6
         print("actions update: ", actions)
     obs, rewards, dones, info = env.step(actions)
+    print("New Obs: ", obs)
         
         
