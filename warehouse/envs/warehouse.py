@@ -133,7 +133,7 @@ class Warehouse(gym.Env):
 
             agent_obs_i = self.agent_obs[i]
             agent_r_i = self.agent_rack_position[i]
-            print(f"agent[{i}] obs: {agent_obs_i}")
+            print(f"agent[{i}] obs: {agent_obs_i} attempting action: {action[i]}")
             if action[i] in [0, 1, 2, 3]:
                 # this is a directional movement, 
                 # agents can move freely if they're not carrying anything
