@@ -3,6 +3,10 @@ use pyo3::prelude::*;
 use serde::{Serialize, Deserialize};
 use serde_json;
 
+pub trait ProcessAlphabet<D> {
+    fn word_router(&self, w: &str, q: i32, data: &D, task: usize ) -> String;
+}
+
 #[pyclass]
 #[derive(Clone, Serialize, Deserialize)]
 pub struct DFA {
@@ -23,7 +27,13 @@ pub struct DFA {
 #[pymethods]
 impl DFA {
     #[new]
-    fn new(states: Vec<i32>, initial_state: i32, accepting: Vec<i32>, rejecting: Vec<i32>, done: Vec<i32>) -> Self {
+    fn new(
+        states: Vec<i32>, 
+        initial_state: i32, 
+        accepting: Vec<i32>, 
+        rejecting: Vec<i32>, 
+        done: Vec<i32>
+    ) -> Self {
         DFA{
             states, 
             name: "task".to_string(),
@@ -31,7 +41,8 @@ impl DFA {
             accepting, 
             rejecting, 
             done, 
-            transitions: Vec::new()}
+            transitions: Vec::new()
+        }
     }
 
     fn add_transition(&mut self, q: i32, w: String, qprime: i32) {
@@ -107,7 +118,7 @@ impl Mission {
         }
     }
 
-    fn get_task(&self, task_idx: usize) -> DFA {
+    pub fn get_task(&self, task_idx: usize) -> DFA {
         self.tasks[task_idx].clone()
     }
 }

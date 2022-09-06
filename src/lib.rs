@@ -8,15 +8,17 @@ pub mod parallel;
 pub mod algorithm;
 pub mod c_binding;
 pub mod lp;
+pub mod envs;
 
 use std::hash::Hash;
 use std::mem;
 use pyo3::prelude::*;
-use pyo3::exceptions::PyValueError;
+//use pyo3::exceptions::PyValueError;
 use hashbrown::HashMap;
 use scpm::model::{SCPM, MOProductMDP};
 use algorithm::synth::{process_scpm, scheduler_synthesis};
-use agent::agent::{Agent, Team};
+use envs::dp_warehouse_setup::{test_prod, test_scpm, warehouse_scheduler_synthesis};
+//use agent::agent::{MDP};
 use dfa::dfa::{DFA, Mission, json_deserialize_from_string};
 //use parallel::{threaded::process_mdps};
 use c_binding::suite_sparse::*;
@@ -25,6 +27,7 @@ extern crate cblas_sys;
 use cblas_sys::{cblas_dcopy, cblas_dgemv, cblas_dscal, cblas_ddot};
 use algorithm::dp::value_iteration;
 use float_eq::float_eq;
+use std::fs;
 
 
 const UNSTABLE_POLICY: i32 = 5;
@@ -337,6 +340,19 @@ pub fn val_or_zero_one(val: &f64) -> f64 {
     }
 }
 //--------------------------------------
+// Python mdp env wrapper 
+//--------------------------------------
+fn get_actions(fpath: &str) -> Result<Vec<f64>, Box<dyn std::error::Error>> {
+    let solver_script_call: String = fs::read_to_string(fpath)?.parse()?;
+    let result: Vec<f64> = Python::with_gil(|py| -> PyResult<Vec<f64>> {
+        let lpsolver = PyModule::from_code(py, &solver_script_call, "", "")?;
+        let gym = PyModule::import(py, "gym")?;
+        let action_space_size = lpsolver.getattr("action_space.n")?.call0()?.extract()?;
+        Ok(action_space_size)
+    }).unwrap();
+    Ok(result)
+}
+//--------------------------------------
 // Python lp wrappers, for linear programming scripts
 //--------------------------------------
 fn solver(hullset: Vec<Vec<f64>>, t: Vec<f64>, nobjs: usize) -> Result<Vec<f64>, Box<dyn std::error::Error>> {
@@ -411,71 +427,52 @@ fn new_target(
 // Some testing functions for python testing of Rust API
 //--------------------------------------
 
-#[pyfunction]
-#[pyo3(name="vi_test")]
-fn value_iteration_test(model: &MOProductMDP, w: Vec<f64>, nagents: usize, ntasks: usize) {
-    //let prods = model.construct_products();
-    //process_mdps(prods);
-    let r = value_iteration(model, &w[..], &0.001, nagents, ntasks);
-    println!("r: {:?}", r);
-}
-
-#[pyfunction]
-#[pyo3(name="alloc_test")]
-fn test_alloc(model: &SCPM, w: Vec<f64>, eps: f64) {
-    let prods = model.construct_products();
-    let (r, _prods, pis, alloc) = process_scpm(model, &w[..], &eps, prods);
-    println!("r {:?}", r);
-    println!("pis {:?}", pis);
-    println!("alloc: {:?}", alloc);
-
-    // then we will use the allocation to compute the randomised scheduler
-}
-
-#[pyfunction]
-#[pyo3(name="scheduler_synthesis")]
-fn meta_scheduler_synthesis(
-    model: &SCPM, 
-    w: Vec<f64>, 
-    eps: f64, 
-    target: Vec<f64>
-) -> PyResult<(Vec<f64>, usize)> {
-    let prods = model.construct_products();
-    let (_pis, alloc, t_new, l) = scheduler_synthesis(model, &w[..], &eps, &target[..], prods);
-    //println!("{:?}", pis);
-    //println!("alloc: \n{:.3?}", alloc);
-    // convert output schedulers to 
-    // we need to construct the randomised scheduler here, then the output from the randomised
-    // scheduler, which will already be from a python script, will be the output of this function
-    let weights = random_sched(alloc, t_new.to_vec(), l, model.tasks.size, model.agents.size);
-    match weights {
-        Some(w) => { return Ok((w, l)) }
-        None => { 
-            return Err(PyValueError::new_err(
-                format!(
-                    "Randomised scheduler weights could not be found for 
-                    target vector: {:?}", 
-                    t_new)
-                )
-            )
-        }
-    }
-}
+//#[pyfunction]
+//#[pyo3(name="scheduler_synthesis")]
+//fn meta_scheduler_synthesis(
+//    model: &SCPM, 
+//    w: Vec<f64>, 
+//    eps: f64, 
+//    target: Vec<f64>,
+//    mdp_transitions: HashMap<(i32, u8), Vec<(i32, f64, String)>>
+//) -> PyResult<(Vec<f64>, usize)> {
+//    let prods = model.construct_products(&mdp_transitions);
+//    let (_pis, alloc, t_new, l) = scheduler_synthesis(model, &w[..], &eps, &target[..], prods);
+//    //println!("{:?}", pis);
+//    //println!("alloc: \n{:.3?}", alloc);
+//    // convert output schedulers to 
+//    // we need to construct the randomised scheduler here, then the output from the randomised
+//    // scheduler, which will already be from a python script, will be the output of this function
+//    let weights = random_sched(alloc, t_new.to_vec(), l, model.tasks.size, model.num_agents);
+//    match weights {
+//        Some(w) => { return Ok((w, l)) }
+//        None => { 
+//            return Err(PyValueError::new_err(
+//                format!(
+//                    "Randomised scheduler weights could not be found for 
+//                    target vector: {:?}", 
+//                    t_new)
+//                )
+//            )
+//        }
+//    }
+//}
 
 /// A Python module implemented in Rust.
 #[pymodule]
 fn ce(_py: Python, m: &PyModule) -> PyResult<()> {
     //m.add_function(wrap_pyfunction!(sum_as_string, m)?)?;
-    m.add_class::<Agent>()?;
+    //m.add_class::<MDP>()?;
     m.add_class::<DFA>()?;
     m.add_class::<Mission>()?;
-    m.add_class::<Team>()?;
+    //m.add_class::<Team>()?;
     m.add_class::<SCPM>()?;
     //m.add_function(wrap_pyfunction!(build_model, m)?)?;
-    m.add_function(wrap_pyfunction!(value_iteration_test, m)?)?;
-    m.add_function(wrap_pyfunction!(test_alloc, m)?)?;
-    m.add_function(wrap_pyfunction!(meta_scheduler_synthesis, m)?)?;
+    //m.add_function(wrap_pyfunction!(value_iteration_test, m)?)?;
+    m.add_function(wrap_pyfunction!(test_prod, m)?)?;
+    m.add_function(wrap_pyfunction!(warehouse_scheduler_synthesis, m)?)?;
     m.add_function(wrap_pyfunction!(json_deserialize_from_string, m)?)?;
     //m.add_function(wrap_pyfunction!(process_scpm, m)?)?;
+    m.add_function(wrap_pyfunction!(test_scpm, m)?)?;
     Ok(())
 }

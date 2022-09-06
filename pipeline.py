@@ -2,6 +2,7 @@ import redis
 import time
 import ce
 import argparse
+from mdp_envs import warehouse
 
 # create a subscriber to listen to messages
 r = redis.Redis(host='localhost', port=6379, db=0)
@@ -20,7 +21,8 @@ if __name__ == "__main__":
         parser.error("interval must be included")
 
     # A multiagent team to conduct a set of multiobjective missions
-    team = ce.Team()
+    # constuct the environment
+    
     mission = ce.Mission() 
 
     eps = 0.0001 if not args.eps else args.eps
