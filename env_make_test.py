@@ -168,6 +168,7 @@ if __name__ == "__main__":
     # Now we need to get the next DFA step for both of the tasks
     # First get the word for the new observations 
     words = []
+    print("tasks: ", tasks)
     for idx in range(NUM_AGENTS):
         if tasks[idx] is not None:
             j = tasks[idx][0]
