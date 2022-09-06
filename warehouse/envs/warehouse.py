@@ -243,12 +243,12 @@ class Warehouse(gym.Env):
                     new_obs = {"a": agent_obs_i["a"], "c": agent_obs_i["c"], "r": agent_r_i}
                     word = ""
                     v.append((new_obs, 1.0, word))
-            elif action[i] == 7:
+            elif action[i] == 6:
                 new_obs = {"a": agent_obs_i["a"], "c": agent_obs_i["c"], "r": agent_r_i}
                 word = ""
                 v.append((new_obs, 1.0, word))
             else:
-                raise(f"Action {action[i]} not registered")
+                raise(f"Action not registered")
 
             # at this point we need to choose a new state based on the probs
             # in v
