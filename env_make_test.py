@@ -134,12 +134,12 @@ if __name__ == "__main__":
             tasks[i] = task_alloc[i].pop()
 
     print("tasks: ", tasks)
+    actions = [-1, -1]
     for idx in range(NUM_AGENTS):
         sidx = outputs.get_index((obs[idx]["a"], obs[idx]["c"], env.agent_rack_position[idx]))
         print("sidx", sidx)
         # get the index from the new state
         print(f"task {idx} -> {tasks[idx]}")
-        actions = [-1, -1]
         print(f"dealing with task: {tasks[idx]}")
         if tasks[idx] is not None:
             k = tasks[idx][1]
