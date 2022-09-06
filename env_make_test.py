@@ -172,7 +172,7 @@ if __name__ == "__main__":
     for idx in range(NUM_AGENTS):
         if tasks[idx] is not None:
             j = tasks[idx][0]
-            word = env.label(Q[j], idx, rack_tasks, j, feedpoints[j])
+            word = env.label(Q[j], idx, rack_tasks, j, task_feeds[j])
             print(f"New word for agent: {idx} q, s': {obs[idx]} is {word}")
         else:
             #What is the default word?
