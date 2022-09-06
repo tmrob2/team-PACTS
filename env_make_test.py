@@ -20,7 +20,7 @@ env = gym.make(
     initial_agent_loc=init_agent_positions, 
     nagents=2,
     feedpoints=feedpoints,
-    render_mode="human",
+    render_mode=None,
     xsize=xsize,
     ysize=ysize
 )
