@@ -61,6 +61,10 @@ impl DFA {
         qprime
     }
 
+    fn reset(&mut self) {
+        self.current_state = self.initial_state;
+    }
+
     fn clone(&self) -> Self {
         DFA {
             states: self.states.to_vec(), 
@@ -131,5 +135,13 @@ impl Mission {
 
     pub fn get_task(&self, task_idx: usize) -> DFA {
         self.tasks[task_idx].clone()
+    }
+
+    pub fn step(&mut self, task: usize, q: i32, word: String) -> i32 {
+        self.tasks[task].next(q, word)
+    }
+
+    pub fn reset(&mut self, task: usize) {
+        self.tasks[task].reset()
     }
 }

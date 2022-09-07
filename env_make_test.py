@@ -174,8 +174,14 @@ if __name__ == "__main__":
             j = tasks[idx][0]
             word = env.label(Q[j], idx, rack_tasks, j, task_feeds[j])
             print(f"New word for agent: {idx} q, s': {obs[idx]} is {word}")
+            # step the task DFA forward
+            qprime = mission.step(j, Q[j], word)
         else:
             #What is the default word?
-            print("Default word is 'a'")
+            print("Default word is 'na'")
+            word = "na"
+        
+
+    
         
         
