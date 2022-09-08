@@ -20,7 +20,7 @@ pub struct MOProductMDP {
     pub agent_id: i32,
     pub task_id: i32,
     action_map: HashMap<(i32, i32), Vec<i32>>,
-    state_map: HashMap<(i32, i32), usize>,
+    pub state_map: HashMap<(i32, i32), usize>,
     reverse_state_map: HashMap<usize, (i32, i32)>
 }
 

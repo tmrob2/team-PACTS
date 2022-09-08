@@ -52,24 +52,6 @@ if __name__ == "__main__":
     target = [-50, -50] + [0.8] * NUM_TASKS
     eps = 0.00001
     init_agent_positions = [(0, 0), (9, 9)]
-    #1. - ce.construct_prod_test(scpm, 13, 13, w, eps)
-    #ce.test_scpm(scpm, w, eps, 10, 10, )
-    complete = False
-    while not complete:
-        try:
-            weights, l, pis = ce.scheduler_synthesis(scpm, w, eps, target, 10, 10, init_agent_positions)
-            complete = True
-        except:
-            print("weights not returned")
-    #print(np.reshape(weights, (NUM_TASKS, l)))
-    weights_ = np.reshape(weights, (NUM_TASKS, l))
-    print(list(weights_))
-    # Now we need to select scehdulers for tasks according to the marginals
-    # then put this into the environment and do a rendering
-    # after this we can make the process continuous
-    print("task 0 weights", weights_[0])
-    ind0 = random.choices(list(range(l)), weights_[0])
-    print(f"choose scheduler {ind0} for task 0")
-    d_ = pis[ind0[0]]
-    print(list(filter(lambda x: x[1] == 0, d_.keys())))
+    ce.construct_prod_test(scpm, 10, 10, w, eps)
+    ce.test_scpm(scpm, w, eps, 10, 10, init_agent_positions)
     

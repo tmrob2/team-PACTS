@@ -6,6 +6,17 @@ import numpy as np
 import random
 import json
 import logging
+from enum import Enum
+
+class TaskStatus: 
+    INPROGESS = 0
+    SUCCESS = 1
+    FAIL = 2
+
+class AgentWorkingStatus:
+    NOT_WORKING = 0
+    WORKING = 1
+
 
 NUM_AGENTS = 2
 NUM_TASKS = 2
@@ -21,7 +32,7 @@ env = gym.make(
     initial_agent_loc=init_agent_positions, 
     nagents=2,
     feedpoints=feedpoints,
-    render_mode=None,
+    render_mode="human",
     xsize=xsize,
     ysize=ysize,
     disable_env_checker=True
@@ -76,7 +87,7 @@ if __name__ == "__main__":
     w = [0] * NUM_AGENTS + [1./ NUM_TASKS] * NUM_TASKS
     target = [-130, -50] + [0.8] * NUM_TASKS
     eps = 0.00001
-    init_agent_positions = [(0, 0), (9, 9)]
+    #init_agent_positions = [[0, 0), (9, 9)]
     #1. - ce.construct_prod_test(scpm, 13, 13, w, eps)
     #ce.test_scpm(scpm, w, eps, 10, 10, )
     # generate the rack positions using the MOTAP interface
@@ -84,6 +95,7 @@ if __name__ == "__main__":
     rack_tasks = random.choices(
         list(racks), weights=[1/len(racks)] * len(racks), k=NUM_TASKS
     )
+    print("Rack tasks: ", rack_tasks)
     task_feeds = random.choices(
         list(feedpoints), weights=[1/len(feedpoints)] * len(feedpoints), k=NUM_TASKS
     )
@@ -134,52 +146,70 @@ if __name__ == "__main__":
     # This is actually the code which will go into the executor script
     #
     Q = [0] * NUM_TASKS
+    agent_task_status = [AgentWorkingStatus.NOT_WORKING] * NUM_AGENTS
+    agent_working_on_tasks = [None, None] # TODO we need to use this instead of the 
+    # TODO dictionary and pop the task into this list
+    # TODO the env state needs to be the same as the MOTAP state 
+    #      otherwise the executor is specific
     tasks = {i: None for i in range(NUM_AGENTS)}
-    for i in range(NUM_AGENTS):
-        if task_alloc[i]:
-            tasks[i] = task_alloc[i].pop()
 
-    print("tasks: ", tasks)
-    actions = [-1, -1]
+    # There is some sort of loop
 
-    # We need something like current tasks to keep track of the tasks being executed
+    # before we get this code we need a switch to know if this bit is turned on or not
+    # we require an elegant way of releasing an allocation
+    while not mission.check_mission_complete():
+    #for _ in range(10):
+        for i in range(NUM_AGENTS):
+            if agent_task_status[i] == AgentWorkingStatus.NOT_WORKING:
+                # allocate a task to the agent
+                if task_alloc[i]:
+                    tasks[i] = task_alloc[i].pop()
+                    agent_task_status[i] = AgentWorkingStatus.WORKING
 
-    for idx in range(NUM_AGENTS):
-        # There is a problem here because I don't think that outputs can be serialized
-        # but the executor needs to run on another thread
-        sidx = outputs.get_index((obs[idx]["a"], obs[idx]["c"], env.agent_rack_position[idx]))
-        print("sidx", sidx)
-        # get the index from the new state
-        print(f"task {idx} -> {tasks[idx]}")
-        print(f"dealing with task: {tasks[idx]}")
-        if tasks[idx] is not None:
-            k = tasks[idx][1]
-            j = tasks[idx][0]
-            pi = pis[k][(idx, j)]
-            print(f"Agent {idx} state: {(obs[idx]['a'], obs[idx]['c'], env.agent_rack_position[idx])} -> idx: {sidx}, action: {int(pi[sidx])}")
-            actions[idx] = int(pi[sidx])
-        else:
-            print(f"Agent {idx} state: {(obs[idx]['a'], obs[idx]['c'], env.agent_rack_position[idx])} -> idx: {sidx}, action: {6}")
-            actions[idx] = 6
-        print("actions update: ", actions)
-    obs, rewards, dones, info = env.step(actions)
-    print("New Obs: ", obs)
+        print("tasks: ", tasks)
+        actions = [-1, -1]
 
-    # Now we need to get the next DFA step for both of the tasks
-    # First get the word for the new observations 
-    words = []
-    print("tasks: ", tasks)
-    for idx in range(NUM_AGENTS):
-        if tasks[idx] is not None:
-            j = tasks[idx][0]
-            word = env.label(Q[j], idx, rack_tasks, j, task_feeds[j])
-            print(f"New word for agent: {idx} q, s': {obs[idx]} is {word}")
-            # step the task DFA forward
-            qprime = mission.step(j, Q[j], word)
-        else:
-            #What is the default word?
-            print("Default word is 'na'")
-            word = "na"
+        # We need something like current tasks to keep track of the tasks being executed
+
+        for idx in range(NUM_AGENTS):
+            # There is a problem here because I don't think that outputs can be serialized
+            # but the executor needs to run on another thread
+            lookup_state = (tuple(obs[idx]["a"]), obs[idx]["c"], env.agent_rack_position[idx])
+            #print("lookup state", lookup_state)
+            sidx = outputs.get_index(lookup_state)
+            #print("sidx", sidx)
+            # get the index from the new state
+            #print(f"task {idx} -> {tasks[idx]}")
+            #print(f"dealing with task: {tasks[idx]}")
+            if tasks[idx] is not None:
+                k = tasks[idx][1]
+                j = tasks[idx][0]
+                pi = pis[k][(idx, j)]
+                #print(f"Agent {idx} state: {(obs[idx]['a'], obs[idx]['c'], env.agent_rack_position[idx])} -> idx: {sidx}, action: {int(pi[sidx])}")
+                actions[idx] = int(pi[sidx])
+            else:
+                #print(f"Agent {idx} state: {(obs[idx]['a'], obs[idx]['c'], env.agent_rack_position[idx])} -> idx: {sidx}, action: {6}")
+                actions[idx] = 6
+            #print("actions update: ", actions)
+        obs, rewards, dones, info = env.step(actions)
+        #print("New Obs: ", obs)
+
+        # Now we need to get the next DFA step for both of the tasks
+        # First get the word for the new observations 
+        words = []
+        #print("tasks: ", tasks)
+        for idx in range(NUM_AGENTS):
+            if tasks[idx] is not None:
+                j = tasks[idx][0]
+                word = env.label(Q[j], idx, rack_tasks, j, task_feeds[j])
+                #print(f"New word for agent: {idx} q, s': {obs[idx]} is {word}")
+                # step the task DFA forward
+                qprime = mission.step(j, Q[j], word)
+                Q[j] = qprime
+            else:
+                #What is the default word?
+                #print("Default word is 'na'")
+                word = "na"
         
 
     

@@ -22,7 +22,7 @@ pub struct DFA {
     #[pyo3(get)]
     pub done: Vec<i32>,
     pub transitions: Vec<(i32, String, i32)>,
-    current_state: i32,
+    current_state: i32
 }
 
 #[pymethods]
@@ -43,7 +43,7 @@ impl DFA {
             rejecting, 
             done, 
             transitions: Vec::new(),
-            current_state: 0
+            current_state: 0,
         }
     }
 
@@ -61,6 +61,18 @@ impl DFA {
         qprime
     }
 
+    fn check_done(&self) -> u8 {
+        if self.accepting.contains(&self.current_state) {
+            2
+        } else if self.rejecting.contains(&self.current_state) {
+            3
+        } else if self.current_state == self.initial_state {
+            0
+        } else {
+            1
+        }
+    }
+
     fn reset(&mut self) {
         self.current_state = self.initial_state;
     }
@@ -74,7 +86,7 @@ impl DFA {
             rejecting: self.rejecting.to_vec(), 
             done: self.done.to_vec(), 
             transitions: self.transitions.clone(),
-            current_state: 0
+            current_state: 0,
         }
     }
 
@@ -143,5 +155,22 @@ impl Mission {
 
     pub fn reset(&mut self, task: usize) {
         self.tasks[task].reset()
+    }
+
+    pub fn check_done(&self, task: usize) -> u8 {
+        self.tasks[task].check_done()
+    }
+
+    pub fn check_mission_complete(&self) -> bool {
+        let mut complete: bool = true;
+        for task in self.tasks.iter() {
+            if task.accepting.contains(&task.current_state) 
+                || task.rejecting.contains(&task.current_state) {
+                // do nothing 
+            } else {
+                complete = false;
+            }
+        }
+        return complete
     }
 }
