@@ -1,11 +1,8 @@
-use hashbrown::HashMap;
+//use hashbrown::HashMap;
+use std::collections::{HashMap, HashSet};
 use pyo3::prelude::*;
 use serde::{Serialize, Deserialize};
 use serde_json;
-
-pub trait ProcessAlphabet<D> {
-    fn word_router(&self, w: &str, q: i32, data: &D, task: usize ) -> String;
-}
 
 #[pyclass]
 #[derive(Clone, Serialize, Deserialize)]
@@ -21,8 +18,14 @@ pub struct DFA {
     pub rejecting: Vec<i32>,
     #[pyo3(get)]
     pub done: Vec<i32>,
-    pub transitions: Vec<(i32, String, i32)>,
-    current_state: i32
+    pub transitions: HashMap<(i32, String), i32>,
+    current_state: i32,
+    words: HashSet<String>
+}
+
+/// Supply a convenience trait so that we can simply or create words in the environment
+pub trait Expression<D> {
+    fn conversion(&self, q: i32, data: &D) -> String;
 }
 
 #[pymethods]
@@ -42,23 +45,24 @@ impl DFA {
             accepting, 
             rejecting, 
             done, 
-            transitions: Vec::new(),
+            transitions: HashMap::new(),
             current_state: 0,
+            words: HashSet::new()
         }
     }
 
     fn add_transition(&mut self, q: i32, w: String, qprime: i32) {
-        if !self.transitions.contains(&(q, w.to_string(), qprime)) {
-            self.transitions.push((q, w, qprime));
+        self.transitions.insert((q, w), qprime);
+    }
+
+    fn define_words(&mut self, words: HashSet<String>) {
+        for word in words.iter() {
+            self.words.insert(word.to_string());
         }
     }
 
     fn next(&mut self, state: i32, word: String) -> i32 {
-        let qprime = self.transitions.iter()
-            .filter(|(q, w, qprime)| *q == state && w == &word)
-            .map(|(q, w, qprime)| *qprime).collect::<Vec<i32>>()[0];
-        self.current_state = qprime;
-        qprime
+        *self.transitions.get(&(state, word)).unwrap()
     }
 
     fn check_done(&self) -> u8 {
@@ -87,6 +91,7 @@ impl DFA {
             done: self.done.to_vec(), 
             transitions: self.transitions.clone(),
             current_state: 0,
+            words: self.words.clone()
         }
     }
 
@@ -106,15 +111,15 @@ pub fn json_deserialize_from_string(s: String) -> DFA {
     task
 }
 
-impl DFA {
-    pub fn construct_transition_hashmap(&self) -> HashMap<(i32, String), i32> {
-        let mut map: HashMap<(i32, String), i32> = HashMap::new();
-        for (q, w, qprime) in self.transitions.iter() {
-            map.insert((*q, w.to_string()), *qprime);
-        }
-        map
-    }
-}
+//impl DFA {
+//    pub fn construct_transition_hashmap(&self) -> HashMap<(i32, String), i32> {
+//        let mut map: HashMap<(i32, String), i32> = HashMap::new();
+//        for (q, w, qprime) in self.transitions.iter() {
+//            map.insert((*q, w.to_string()), *qprime);
+//        }
+//        map
+//    }
+//}
 
 #[pyclass]
 #[derive(Clone)]

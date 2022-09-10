@@ -1,7 +1,7 @@
 use crate::agent::agent::{MDP, Env};
-use crate::scpm::model::{SCPM, build_model};
+use crate::scpm::model::{SCPM, build_model, MOProductMDP};
 use crate::algorithm::synth::{process_scpm, scheduler_synthesis};
-use crate::dfa::dfa::{DFA, ProcessAlphabet};
+use crate::dfa::dfa::{DFA, Expression};
 use crate::algorithm::dp::value_iteration;
 use crate::{random_sched};
 use hashbrown::{HashMap, HashSet};
@@ -20,6 +20,14 @@ type State = (Point, u8, Option<Point>);
 // ---------------------------------------------------------------
 // Grid Helper Functions
 // ---------------------------------------------------------------
+
+struct WordData<'a> {
+    current: State,
+    next: State,
+    warehouse_data: Data<'a>,
+    current_task_id: usize
+}
+
 
 #[pyclass]
 #[derive(Clone)]
@@ -97,7 +105,7 @@ impl Word {
 // ---------------------------------------------------------------
 // Env MDP implementation
 // ---------------------------------------------------------------
-
+#[derive(Debug)]
 struct Data<'a> {
     xsize: usize,
     ysize: usize,
@@ -280,7 +288,7 @@ pub fn place_racks(xsize: usize, ysize: usize)
     for c in 2..xsize - 2 {
         if count < 2 {
             for r in 1..ysize - 2 { 
-                racks.insert((r as i8, c as i8));
+                racks.insert((c as i8, r as i8));
             }
             count += 1;
         } else {
@@ -289,7 +297,6 @@ pub fn place_racks(xsize: usize, ysize: usize)
     }
     racks
 }
-
 
 
 #[pyfunction]
@@ -423,12 +430,14 @@ pub fn test_prod(
     rack_points: Vec<Point>,
     task_feeds: Vec<Point>,
     feedpoints: Vec<Point>,
+    racks: HashSet<Point>,
     mut outputs: MDPOutputs
-) -> (Vec<f64>, MDPOutputs) {
+)
+-> (Vec<f64>, MDPOutputs) {
     let t1 = Instant::now();
     println!("Constructing MDP of agent environment");
     let init_state: State = (init_agent_pos, 0, None);
-    let racks = place_racks(xsize, ysize);
+    //let racks = place_racks(xsize, ysize);
     let mut action_to_dir: HashMap<u8, [i8; 2]> = HashMap::new();
     let dirs = vec![(0, [1, 0]),(1, [0, 1]),(2, [-1, 0]),(3,[0, -1])];
     for (k, v) in dirs.iter() {
@@ -436,6 +445,8 @@ pub fn test_prod(
     } // [(0, ysize as i8 / 2)]; //, [(xsize as i8 - 1, ysize as i8 / 2)];
     // for each task choose a random feedpoint
     let data: Data = Data::new(xsize, ysize, &racks, &action_to_dir, &task_feeds[..], &rack_points[..]);
+    println!("{:?}", data);
+    println!("Rack Task: {:?}, Feed Points: {:?}", rack_points, feedpoints);
     let actions: Vec<u8> = (0..6).collect();
     let mut mdp: MDP<State, Data> = MDP::new(data, init_state, actions);
     set_state_space(&mut mdp);
@@ -465,83 +476,44 @@ pub fn test_prod(
     outputs.state_map = mdp.state_map;
     outputs.rev_state_map = mdp.reverse_state_map;
     let mut pmap: HashMap<(i32, i32), HashMap<(i32, i32), usize>> = HashMap::new();
+    decode_policy(&pi, &outputs, &pmdp);
     pmap.insert((0, 0), pmdp.state_map);
     outputs.prod_state_map = pmap;
     (pi, outputs)
 }
 
-impl<'a> ProcessAlphabet<Data<'a>> for DFA {
-    fn word_router(&self, w: &str, q: i32, data: &Data, task: usize) -> String {
-        // The word that comes in will need to be deserialised and then processed in the word map
-        let word: Word = serde_json::from_str(w).unwrap();
+pub fn decode_policy(policy: &[f64], outputs: &MDPOutputs, pmdp: &MOProductMDP) {
+    for (i, act) in policy.iter().enumerate().filter(|(s, act)| **act == 5.0) {
+        // the index of the state is i so we first need to decode it into a product state
+        let (s, q) = pmdp.get_reverse_state_map().get(&i).unwrap();
+        // now convert the s index to an mdp state
+        let warehouse_state = outputs.rev_state_map.get(s).unwrap();
+        if warehouse_state.0 == (9, 5) && *q == 4 {
+            println!("s: {:?}, q: {}, prod: idx: {}", warehouse_state, q, i);
+        }
+    }
+}
 
-        let result: String = match q {
+impl<'a> Expression<WordData<'a>> for DFA {
+    fn conversion(&self, q: i32, data: &WordData) -> String {
+        match q {
             0 => {
-                if word.a == data.rackpoints[task] {
-                    if word.c == 0 {
-                        "a".to_string()
-                    } else {
-                        "fail".to_string()
-                    }
-                } else {
-                    "na".to_string()
-                }
+                if data.current.0 == data.warehouse_data.rackpoints[]
             }
             1 => {
-                if word.c == 1 {
-                    "r".to_string()
-                } else {
-                    "nr".to_string()
-                }
+
             }
             2 => {
-                if word.c == 1 {
-                    let rack_pos_ = word.r.unwrap();
-                    // check that both the agent and the rack are back at
-                    // the designated feedpoint
-                    if data.feedpoints[task as usize] == rack_pos_
-                        && data.feedpoints[task as usize] == word.a {
-                        "cf".to_string()
-                    } else {
-                        "ncf".to_string()
-                    }
-                } else {
-                    "fail".to_string()
-                }
+
             }
             3 => {
-                if word.c == 1 {
-                    let rack_pos_ = word.r.unwrap();
-                    // check that both the agent and the rack are back at
-                    // the designated feedpoint
-                    if data.rackpoints[task as usize] == rack_pos_
-                        && data.rackpoints[task as usize] == word.a {
-                        "ca".to_string()
-                    } else {
-                        "nca".to_string()
-                    }
-                } else {
-                    "fail".to_string()
-                }
-            }
-            4 => {
-                if word.c == 0 {
-                    //let rack_pos_ = word.r.unwrap();
-                    //let rack_pos = (rack_pos_.0 as i8, rack_pos_.1 as i8);
-                    // check that both the agent and the rack are back at
-                    // the designated feedpoint
-                    "er".to_string()
-                } else {
-                    "ca".to_string()
-                }
-            }
-            5 => {"true".to_string()}
-            6 => {"true".to_string()}
-            7 => {"true".to_string()}
-            _ => {panic!("Q state not found")}
-        };
 
-        result
-
+            }
+            4 => {}
+            5 => {}
+            6 => {}
+            7 => {}
+            _ => {}
+        }
     }
 }

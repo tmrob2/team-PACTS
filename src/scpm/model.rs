@@ -3,7 +3,7 @@
 use hashbrown::{HashMap, HashSet};
 use pyo3::prelude::*;
 use crate::agent::agent::{MDP, Env};
-use crate::dfa::dfa::{DFA, Mission, ProcessAlphabet};
+use crate::dfa::dfa::{DFA, Mission, Expression};
 use std::collections::VecDeque;
 use crate::*;
 
@@ -152,7 +152,7 @@ fn process_mo_reward(
     rewards_map.insert((action, sidx), rewards);
 }
 
-pub fn build_model<S, D>(
+pub fn build_model<S, D, W>(
     initial_state: (i32, i32),
     //agent: &Agent,
     //mdp_rewards: &HashMap<(i32, i32), f64>,
@@ -165,7 +165,7 @@ pub fn build_model<S, D>(
     nobjs: usize,
     actions: &[i32]
 ) -> MOProductMDP 
-where S: Copy, MDP<S, D>: Env<S>, DFA: ProcessAlphabet<D> {
+where S: Copy + std::fmt::Debug, MDP<S, D>: Env<S>, DFA: Expression<W> {
     let mdp: MOProductMDP = product_mdp_bfs(
         &initial_state,
         //agent, 
@@ -182,12 +182,12 @@ where S: Copy, MDP<S, D>: Env<S>, DFA: ProcessAlphabet<D> {
     mdp
 }
 
-fn product_mdp_bfs<S, D>(
+fn product_mdp_bfs<S, D, W>(
     initial_state: &(i32, i32),
     //agent_fpath: &str,
     //mdp: &Agent,
     //mdp_rewards: &HashMap<(i32, i32), f64>,
-    mdp: &mut MDP<S, D>,
+    mdp: &mut MDP<S, D>, // MDP could be a trait
     //mdp_available_actions: &HashMap<i32, Vec<i32>>,
     task: &DFA,
     agent_id: i32, 
@@ -196,7 +196,7 @@ fn product_mdp_bfs<S, D>(
     nobjs: usize,
     actions: &[i32]
 ) -> MOProductMDP
-where S: Copy, MDP<S, D>: Env<S>, DFA: ProcessAlphabet<D> {
+where S: Copy + std::fmt::Debug, MDP<S, D>: Env<S>, DFA: Expression<W> {
     let mut visited: HashSet<(i32, i32)> = HashSet::new();
     let mut transitions: HashMap<(i32, usize, usize), f64> = HashMap::new();
     let mut rewards: HashMap<(i32, usize), Vec<f64>> = HashMap::new();
@@ -207,8 +207,6 @@ where S: Copy, MDP<S, D>: Env<S>, DFA: ProcessAlphabet<D> {
     let mut product_mdp: MOProductMDP = MOProductMDP::new(
         *initial_state, &actions[..], agent_id, task_id
     );
-
-    let dfa_transitions = task.construct_transition_hashmap();
 
     // input the initial state into the back of the stack
     stack.push_back(*initial_state);
@@ -236,8 +234,16 @@ where S: Copy, MDP<S, D>: Env<S>, DFA: ProcessAlphabet<D> {
                 product_mdp.insert_action(action as i32);
                 product_mdp.insert_avail_act(&(s, q), action as i32);
                 for (sprime, p, w) in v.iter() { 
-                    let qword = task.word_router(w, q, &mdp.extraData, task_id as usize);
-                    let qprime: i32 = *dfa_transitions.get(&(q, qword)).unwrap();
+
+                    let qprime: i32 = *task.transitions.get(&(q, w.to_string())).unwrap();
+                    /*if q == 1 && qprime == 2 {
+                        println!("s: {:?}, q: {} -> s': {:?}, q': {}",
+                            mdp.reverse_state_map.get(&s).unwrap(),
+                            q,
+                            mdp.reverse_state_map.get(sprime).unwrap(),
+                            qprime
+                        );
+                    }*/
                     if !visited.contains(&(*sprime, qprime)) {
                         visited.insert((*sprime, qprime));
                         stack.push_back((*sprime, qprime));
@@ -308,12 +314,12 @@ impl SCPM{
 }
 
 impl SCPM {
-    pub fn construct_products<S, D>(
+    pub fn construct_products<S, D, W>(
         &self, 
         mdp: &mut MDP<S, D>,
         initial_states: &[(i32, i32)]
     ) -> Vec<MOProductMDP>
-    where S: Copy, MDP<S, D>: Env<S>, DFA: ProcessAlphabet<D> {
+    where S: Copy + std::fmt::Debug, MDP<S, D>: Env<S>, DFA: Expression<W> {
 
         // TODO: because memory is very cheap now, we can implement
         // multithreading to crease the product MDP models
