@@ -17,7 +17,8 @@ use pyo3::prelude::*;
 use hashbrown::HashMap;
 use scpm::model::{SCPM}; // , MOProductMDP};
 //use algorithm::synth::{process_scpm, scheduler_synthesis};
-use envs::dp_warehouse_setup::{test_prod, test_scpm, warehouse_scheduler_synthesis, place_racks, MDPOutputs};
+//test_scpm, warehouse_scheduler_synthesis
+use envs::warehouse::{Warehouse, test_prod, MDPOutputs};
 //use agent::agent::{MDP};
 use dfa::dfa::{DFA, Mission, json_deserialize_from_string};
 //use parallel::{threaded::process_mdps};
@@ -468,13 +469,13 @@ fn ce(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<MDPOutputs>()?;
     //m.add_class::<Team>()?;
     m.add_class::<SCPM>()?;
+    m.add_class::<Warehouse>()?;
     //m.add_function(wrap_pyfunction!(build_model, m)?)?;
     //m.add_function(wrap_pyfunction!(value_iteration_test, m)?)?;
     m.add_function(wrap_pyfunction!(test_prod, m)?)?;
-    m.add_function(wrap_pyfunction!(warehouse_scheduler_synthesis, m)?)?;
+    //m.add_function(wrap_pyfunction!(warehouse_scheduler_synthesis, m)?)?;
     m.add_function(wrap_pyfunction!(json_deserialize_from_string, m)?)?;
-    m.add_function(wrap_pyfunction!(place_racks, m)?)?;
     //m.add_function(wrap_pyfunction!(process_scpm, m)?)?;
-    m.add_function(wrap_pyfunction!(test_scpm, m)?)?;
+    //m.add_function(wrap_pyfunction!(test_scpm, m)?)?;
     Ok(())
 }

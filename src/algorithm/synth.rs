@@ -4,21 +4,25 @@ use crate::{Mantissa, blas_dot_product, val_or_zero_one, solver, new_target};
 //use pyo3::prelude::*;
 use crate::parallel::threaded::process_mdps;
 use std::time::Instant;
+use std::hash::Hash;
 
 //#[pyfunction]
 //#[pyo3(name="para_test")]
-pub fn process_scpm(
+pub fn process_scpm<S>(
     model: &SCPM, 
     w: &[f64], 
     eps: &f64,
-    prods: Vec<MOProductMDP>
-) -> (Vec<f64>, Vec<MOProductMDP>, HashMap<(i32, i32), Vec<f64>>, Vec<(i32, i32, Vec<f64>)>) {
+    prods: Vec<MOProductMDP<S>>
+) -> (Vec<f64>, Vec<MOProductMDP<S>>, HashMap<(i32, i32), Vec<f64>>, Vec<(i32, i32, Vec<f64>)>) 
+where S: Send + Sync + Copy + Hash + Eq + 'static {
     // Algorithm 1 will need to follow this format
     // where we move the ownership of the product models into a function 
     // which processes them and then return those models again for reprocessing
     let num_agents = model.num_agents;
     let num_tasks = model.tasks.size;
-    let (prods, mut pis, alloc_map, mut result) = process_mdps(prods, &w[..], &eps, num_agents, num_tasks).unwrap();
+    let (prods, mut pis, alloc_map, mut result) = process_mdps(
+        prods, &w[..], &eps, num_agents, num_tasks
+    ).unwrap();
     
     let mut r = vec![0.; num_agents + num_tasks];
     let mut alloc: Vec<(i32, i32, Vec<f64>)> = Vec::new();
@@ -43,8 +47,14 @@ pub fn process_scpm(
 }
 
 
-pub fn scheduler_synthesis(model: &SCPM, w: &[f64], eps: &f64, t: &[f64], prods_: Vec<MOProductMDP>) 
--> (HashMap<usize, HashMap<(i32, i32), Vec<f64>>>, Vec<(i32, i32, i32, Vec<f64>)>, Vec<f64>, usize) {
+pub fn scheduler_synthesis<S>(
+    model: &SCPM, 
+    w: &[f64], 
+    eps: &f64, 
+    t: &[f64], 
+    prods_: Vec<MOProductMDP<S>>
+) -> (HashMap<usize, HashMap<(i32, i32), Vec<f64>>>, Vec<(i32, i32, i32, Vec<f64>)>, Vec<f64>, usize)
+where S: Send + Sync + Copy + Hash + Eq + 'static {
     let t1 = Instant::now();
     //let torig = t.to_vec();
     //println!("initial w: {:.3?}", w);

@@ -6,27 +6,29 @@ use hashbrown::HashMap;
 //use rand::prelude::*;
 //use std::thread;
 use crate::algorithm::dp::value_iteration;
+use std::hash::Hash;
 //use std::time::{Instant};
 
 
 const NUM_THREADS: usize = 4;
 
-pub fn process_mdps(
-    mdps: Vec<MOProductMDP>, 
+pub fn process_mdps<S>(
+    mdps: Vec<MOProductMDP<S>>, 
     w: &[f64], 
     eps: &f64,
     num_agents: usize,
     num_tasks: usize
 ) -> Result<(
-        Vec<MOProductMDP>, 
+        Vec<MOProductMDP<S>>, 
         HashMap<(i32, i32), Vec<f64>>,
         HashMap<(i32, i32), Vec<f64>>,
         HashMap<i32, Vec<(i32,f64)>>,
     ), 
-    Box<dyn std::error::Error>> {
+    Box<dyn std::error::Error>>
+where S: Send + Sync + Copy + Hash + Eq + 'static {
 
     //let t1 = Instant::now();
-    let mut mdp_return_vec: Vec<MOProductMDP> = Vec::new();
+    let mut mdp_return_vec: Vec<MOProductMDP<S>> = Vec::new();
     let mut result: HashMap<i32, Vec<(i32,f64)>> = HashMap::new();
     let mut alloc_map: HashMap<(i32, i32), Vec<f64>> = HashMap::new();
     let mut pis: HashMap<(i32, i32), Vec<f64>> = HashMap::new();
@@ -73,8 +75,14 @@ pub fn process_mdps(
 }
 
 /// This function could be turned into value iteration
-fn compute_value(mdp: MOProductMDP, w: Vec<f64>, eps: f64, nagents: usize, ntasks: usize) 
-    -> (MOProductMDP, Vec<f64>, Vec<f64>) {
+fn compute_value<S>(
+    mdp: MOProductMDP<S>, 
+    w: Vec<f64>, 
+    eps: f64, 
+    nagents: usize, 
+    ntasks: usize
+) -> (MOProductMDP<S>, Vec<f64>, Vec<f64>)
+where S: Copy + Hash + Eq {
     let (pi, r) = value_iteration(&mdp, &w[..], &eps, nagents, ntasks);
     //println!("mdp({},{}) -> {:.3?}", mdp.agent_id, mdp.task_id, r);
     (mdp, pi, r)

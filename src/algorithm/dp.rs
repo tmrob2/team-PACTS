@@ -8,8 +8,14 @@ use float_eq::float_eq;
 /// Given a Product MDP, and a weight vector perform a multi-objective 
 /// value-policy iteration to generate a simple scheduler which is an optimal 
 /// solution to this problem
-pub fn value_iteration(prod: &MOProductMDP, w: &[f64], eps: &f64, nagents: usize, ntasks:usize) 
-    -> (Vec<f64>, Vec<f64>) {
+pub fn value_iteration<S>(
+    prod: &MOProductMDP<S>, 
+    w: &[f64], 
+    eps: &f64, 
+    nagents: usize, 
+    ntasks:usize
+) -> (Vec<f64>, Vec<f64>) 
+where S: Copy + Hash + Eq {
     let size = prod.states.len();
     let nobjs: usize = nagents + ntasks;
     // convert the matrices to cs_di fmt
@@ -161,7 +167,8 @@ pub fn value_iteration(prod: &MOProductMDP, w: &[f64], eps: &f64, nagents: usize
     (pi, r)
 }
 
-fn random_policy(prod: &MOProductMDP) -> Vec<f64> {
+fn random_policy<S>(prod: &MOProductMDP<S>) -> Vec<f64>
+where S: Copy + Hash + Eq {
     let mut pi: Vec<f64> = vec![0.; prod.states.len()];
     for state in prod.states.iter() {
         let state_idx = prod.get_state_map().get(state).unwrap();
@@ -174,8 +181,8 @@ fn random_policy(prod: &MOProductMDP) -> Vec<f64> {
 }
 
 #[allow(non_camel_case_types, non_snake_case)]
-fn construct_argmax_spmatrix(
-    prod: &MOProductMDP, 
+fn construct_argmax_spmatrix<S>(
+    prod: &MOProductMDP<S>, 
     pi: &[f64], 
     matrices: &HashMap<i32, SparseMatrix>,
     size: usize
@@ -230,8 +237,8 @@ fn construct_argmax_spmatrix(
     }
 }
 
-fn construct_argmax_Rmatrix(
-    prod: &MOProductMDP, 
+fn construct_argmax_Rmatrix<S>(
+    prod: &MOProductMDP<S>, 
     pi: &[f64], 
     nobjs: usize
 ) -> DenseMatrix {
@@ -250,7 +257,7 @@ fn construct_argmax_Rmatrix(
     }
 }
 
-fn construct_argmax_Rvector(prod: &MOProductMDP, pi: &[f64]) -> Vec<f64> {
+fn construct_argmax_Rvector<S>(prod: &MOProductMDP<S>, pi: &[f64]) -> Vec<f64> {
     let size = prod.states.len();
     let agent_idx = prod.agent_id as usize;
     let mut R: Vec<f64> = vec![0.; size];

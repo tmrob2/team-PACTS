@@ -8,10 +8,9 @@ use std::collections::VecDeque;
 use crate::*;
 
 
-#[pyclass]
-pub struct MOProductMDP {
-    pub initial_state: (i32, i32),
-    pub states: Vec<(i32, i32)>,
+pub struct MOProductMDP<S> {
+    pub initial_state: (S, i32),
+    pub states: Vec<(S, i32)>,
     pub actions: Vec<i32>,
     //pub rewards: HashMap<((i32, i32), i32), Vec<f64>>,
     //pub transitions: HashMap<((i32, i32), i32), Vec<((i32, i32), f64)>>,
@@ -19,24 +18,13 @@ pub struct MOProductMDP {
     pub rewards_mat: HashMap<i32, DenseMatrix>,
     pub agent_id: i32,
     pub task_id: i32,
-    action_map: HashMap<(i32, i32), Vec<i32>>,
-    pub state_map: HashMap<(i32, i32), usize>,
-    reverse_state_map: HashMap<usize, (i32, i32)>
+    action_map: HashMap<(S, i32), Vec<i32>>,
+    pub state_map: HashMap<(S, i32), usize>,
+    reverse_state_map: HashMap<usize, (S, i32)>
 }
 
-#[pymethods]
-impl MOProductMDP {
-    pub fn print_transitions(&self) {
-        // todo convert matrix to cs_di and print
-    }
-
-    pub fn print_rewards(&self) {
-        // todo convert matrix to cs_di and print
-    }
-}
-
-impl MOProductMDP {
-    pub fn new(initial_state: (i32, i32), actions: &[i32], agent_id: i32, task_id: i32) -> Self {
+impl<S> MOProductMDP<S> where S: Copy + Eq + Hash {
+    pub fn new(initial_state: (S, i32), actions: &[i32], agent_id: i32, task_id: i32) -> Self {
         let mut transitions: HashMap<i32, Triple> = HashMap::new();
         let mut rewards: HashMap<i32, DenseMatrix> = HashMap::new();
         for action in actions.iter() {
@@ -58,13 +46,13 @@ impl MOProductMDP {
         }
     }
 
-    fn insert_state(&mut self, state: (i32, i32)) {
+    fn insert_state(&mut self, state: (S, i32)) {
         let state_idx = self.states.len();
         self.states.push(state);
         self.insert_state_mapping(state, state_idx);
     }
 
-    fn insert_avail_act(&mut self, state: &(i32, i32), action: i32) {
+    fn insert_avail_act(&mut self, state: &(S, i32), action: i32) {
         match self.action_map.get_mut(state) {
             Some(acts) => {
                 if !acts.contains(&action) {
@@ -77,19 +65,19 @@ impl MOProductMDP {
         }
     }
 
-    pub fn get_available_actions(&self, state: &(i32, i32)) -> &[i32] {
+    pub fn get_available_actions(&self, state: &(S, i32)) -> &[i32] {
         &self.action_map.get(state).unwrap()[..]
     }
 
-    pub fn get_state_map(&self) -> &HashMap<(i32, i32), usize> {
+    pub fn get_state_map(&self) -> &HashMap<(S, i32), usize> {
         &self.state_map
     }
 
-    pub fn get_reverse_state_map(&self) -> &HashMap<usize, (i32, i32)> {
+    pub fn get_reverse_state_map(&self) -> &HashMap<usize, (S, i32)> {
         &self.reverse_state_map
     }
 
-    fn insert_state_mapping(&mut self, state: (i32, i32), state_idx: usize) {
+    fn insert_state_mapping(&mut self, state: (S, i32), state_idx: usize) {
         self.state_map.insert(state, state_idx);
     }
 
@@ -124,8 +112,6 @@ impl MOProductMDP {
 
 fn process_mo_reward(
     rewards_map: &mut HashMap<(i32, usize), Vec<f64>>,
-    //mdp_rewards: &HashMap<(i32, i32), f64>,
-    s: i32,
     q: i32,
     sidx: usize,
     task: &DFA,
@@ -152,21 +138,21 @@ fn process_mo_reward(
     rewards_map.insert((action, sidx), rewards);
 }
 
-pub fn build_model<S, D, W>(
-    initial_state: (i32, i32),
+pub fn build_model<S, E>(
+    initial_state: (S, i32),
     //agent: &Agent,
     //mdp_rewards: &HashMap<(i32, i32), f64>,
     //transitions: &HashMap<(i32, u8), Vec<(i32, f64, String)>>,
-    mdp: &mut MDP<S, D>,
+    mdp: &mut E, // where E is a generic environment
     task: &DFA,
     agent_id: i32,
     task_id: i32,
     nagents: usize,
     nobjs: usize,
     actions: &[i32]
-) -> MOProductMDP 
-where S: Copy + std::fmt::Debug, MDP<S, D>: Env<S>, DFA: Expression<W> {
-    let mdp: MOProductMDP = product_mdp_bfs(
+) -> MOProductMDP<S> 
+where S: Copy + std::fmt::Debug + Hash + Eq, E: Env<S> {
+    let pmdp: MOProductMDP<S> = product_mdp_bfs(
         &initial_state,
         //agent, 
         //mdp_rewards,
@@ -179,15 +165,15 @@ where S: Copy + std::fmt::Debug, MDP<S, D>: Env<S>, DFA: Expression<W> {
         nobjs,
         actions
     );
-    mdp
+    pmdp
 }
 
-fn product_mdp_bfs<S, D, W>(
-    initial_state: &(i32, i32),
+fn product_mdp_bfs<S, E>(
+    initial_state: &(S, i32),
     //agent_fpath: &str,
     //mdp: &Agent,
     //mdp_rewards: &HashMap<(i32, i32), f64>,
-    mdp: &mut MDP<S, D>, // MDP could be a trait
+    mdp: &E, // MDP could be a trait
     //mdp_available_actions: &HashMap<i32, Vec<i32>>,
     task: &DFA,
     agent_id: i32, 
@@ -195,16 +181,16 @@ fn product_mdp_bfs<S, D, W>(
     nagents: usize,
     nobjs: usize,
     actions: &[i32]
-) -> MOProductMDP
-where S: Copy + std::fmt::Debug, MDP<S, D>: Env<S>, DFA: Expression<W> {
-    let mut visited: HashSet<(i32, i32)> = HashSet::new();
+) -> MOProductMDP<S>
+where S: Copy + std::fmt::Debug + Eq + Hash, E: Env<S> {
+    let mut visited: HashSet<(S, i32)> = HashSet::new();
     let mut transitions: HashMap<(i32, usize, usize), f64> = HashMap::new();
     let mut rewards: HashMap<(i32, usize), Vec<f64>> = HashMap::new();
-    let mut stack: VecDeque<(i32, i32)> = VecDeque::new();
+    let mut stack: VecDeque<(S, i32)> = VecDeque::new();
     
     // get the actions from the env
     
-    let mut product_mdp: MOProductMDP = MOProductMDP::new(
+    let mut product_mdp: MOProductMDP<S> = MOProductMDP::new(
         *initial_state, &actions[..], agent_id, task_id
     );
 
@@ -226,24 +212,16 @@ where S: Copy + std::fmt::Debug, MDP<S, D>: Env<S>, DFA: Expression<W> {
             // insert the mdp rewards
             let task_idx: usize = nagents + task_id as usize;
             process_mo_reward(
-                &mut rewards, s, q, sidx, task, action as i32, nobjs, agent_id as usize, task_idx
+                &mut rewards, q, sidx, task, action as i32, nobjs, agent_id as usize, task_idx
             );
 
-            let v = mdp.step(s, action as u8).unwrap();
+            let v = mdp.step_(s, action as u8).unwrap();
             if !v.is_empty() {
                 product_mdp.insert_action(action as i32);
                 product_mdp.insert_avail_act(&(s, q), action as i32);
                 for (sprime, p, w) in v.iter() { 
 
                     let qprime: i32 = *task.transitions.get(&(q, w.to_string())).unwrap();
-                    /*if q == 1 && qprime == 2 {
-                        println!("s: {:?}, q: {} -> s': {:?}, q': {}",
-                            mdp.reverse_state_map.get(&s).unwrap(),
-                            q,
-                            mdp.reverse_state_map.get(sprime).unwrap(),
-                            qprime
-                        );
-                    }*/
                     if !visited.contains(&(*sprime, qprime)) {
                         visited.insert((*sprime, qprime));
                         stack.push_back((*sprime, qprime));
@@ -284,7 +262,7 @@ where S: Copy + std::fmt::Debug, MDP<S, D>: Env<S>, DFA: Expression<W> {
 
 
 #[pyclass]
-/// SCPM is an unsual object
+/// SCPM is an unusual object
 /// 
 /// For now we will just include the team of agents and a mission
 /// because we just want to look out how the channel works
@@ -314,16 +292,15 @@ impl SCPM{
 }
 
 impl SCPM {
-    pub fn construct_products<S, D, W>(
+    pub fn construct_products<S, E>(
         &self, 
-        mdp: &mut MDP<S, D>,
-        initial_states: &[(i32, i32)]
-    ) -> Vec<MOProductMDP>
-    where S: Copy + std::fmt::Debug, MDP<S, D>: Env<S>, DFA: Expression<W> {
+        mdp: &mut E,
+    ) -> Vec<MOProductMDP<S>>
+    where S: Copy + std::fmt::Debug + Hash + Eq, E: Env<S> {
 
         // TODO: because memory is very cheap now, we can implement
         // multithreading to crease the product MDP models
-        let mut output: Vec<MOProductMDP> = Vec::new();
+        let mut output: Vec<MOProductMDP<S>> = Vec::new();
         //let initial_state: (i32, i32) = (0, 0);
         let nobjs = self.num_agents + self.tasks.size;
         let nagents = self.num_agents;
@@ -333,8 +310,9 @@ impl SCPM {
             //let mdp_transitions = agent.convert_transitions_to_map();
             //let mdp_available_actions = agent.available_actions_to_map();
             for (j, task) in self.tasks.tasks.iter().enumerate() {
+                mdp.set_task(j);
                 output.push(build_model(
-                    initial_states[i], 
+                    (mdp.get_init_state(), 0), 
                     //agent, 
                     //&mdp_rewards,
                     mdp,

@@ -1,9 +1,12 @@
 use hashbrown::HashMap;
 
-// TODO in the future we can implement this trait in pyo3 but for now 
-// we will use a transition hashmap
+// TODO whateve
 pub trait Env<S> {
-    fn step(&mut self, s: i32, action: u8) -> Result<Vec<(i32, f64, String)>, String>;
+    fn step_(&self, s: S, action: u8) -> Result<Vec<(S, f64, String)>, String>;
+
+    fn get_init_state(&self) -> S;
+
+    fn set_task(&mut self, task_id: usize);
 }
 
 // This is the code we already have for an MDP so we have to make this work
