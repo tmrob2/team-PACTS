@@ -8,7 +8,7 @@ import ce
 import random
 
 class Warehouse(gym.Env):
-    metadata = {"render_modes": ["human", "rgb_array", "single_rgb_array"], "render_fps": 5}
+    metadata = {"render_modes": ["human", "rgb_array", "single_rgb_array"], "render_fps": 1}
 
     def __init__(
         self, 

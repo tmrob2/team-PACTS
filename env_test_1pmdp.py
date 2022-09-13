@@ -26,8 +26,8 @@ class AgentWorkingStatus:
 # Set the initial agent locations up front
 # We can set the feed points up front as well because they are static
 init_agent_positions = [(0, 0)]
-size = 2
-feedpoints = [(1, 1)]#[(size - 1, size // 2)]
+size = 10
+feedpoints = [(size - 1, size // 2)]
 print("Feed points", feedpoints)
 
 # ------------------------------------------------------------------------------
@@ -64,7 +64,7 @@ def warehouse_replenishment_task():
 
     # The first transition determines if the label is at the rack
     task.add_transition(0, "R_NC", 1)
-    excluded_words = ['_'.join(x) for x in list(itertools.product(["R"], ["P", "D", "C"]))]
+    excluded_words = ['_'.join(x) for x in list(itertools.product(["R", "NFR", "F"], ["P", "D", "C"]))]
     for w in excluded_words: 
         task.add_transition(0, f"{w}", 7)
     excluded_words.append("R_NC")
@@ -73,7 +73,11 @@ def warehouse_replenishment_task():
     # The second transition determines whether the agent picked up the rack at the 
     # required coord
     task.add_transition(1, "R_P", 2)
-    for w in omega.difference(set(["R_P"])):
+    excluded_words = ['_'.join(x) for x in list(itertools.product(["NFR"], ["P"]))]
+    for w in excluded_words:
+        task.add_transition(1, f"{w}", 7)
+    excluded_words.append("R_P")
+    for w in omega.difference(set(excluded_words)):
         task.add_transition(1, f"{w}", 1)
     # The third transition takes the agent to the feed position while carrying
     task.add_transition(2, "F_C", 3)

@@ -109,8 +109,11 @@ impl Warehouse {
             words,
             seed
         };
-        //new_env.racks = new_env.place_racks(size);
-        new_env.racks.insert((0, 1));
+        // TODO finish testing of different minimal warehouse layouts.
+        new_env.racks = new_env.place_racks(size);
+        // test: => new_env.racks.insert((0, 1));
+        //new_env.racks.insert((0, 1));
+        //new_env.racks.insert((0, 2));
         new_env
     }
     
@@ -255,9 +258,9 @@ impl Env<State> for Warehouse {
                         let success_rack_pos = Some(agent_new_loc);
                         let success_state: State = (agent_new_loc, 1, success_rack_pos);
                         let success_word = self.process_word(&state, &success_state);
-                        /*println!("{:?}, {} -> {:?} => {}", 
-                            state, action, success_state, success_word
-                        );*/
+                        //println!("{:?}, {} -> {:?} => {}", 
+                        //    state, action, success_state, success_word
+                        //);
                         let fail_state: State = (agent_new_loc, 0, state.2);
                         let fail_word = self.process_word(&state, &fail_state);
 
@@ -269,7 +272,9 @@ impl Env<State> for Warehouse {
                     let success_rack_pos = Some(agent_new_loc);
                     let success_state: State = (agent_new_loc, 1, success_rack_pos);
                     let success_word = self.process_word(&state, &success_state);
-
+                    //println!("{:?}, {} -> {:?} => {}", 
+                    //    state, action, success_state, success_word
+                    //);
                     let fail_state: State = (agent_new_loc, 0, state.2);
                     let fail_word = self.process_word(&state, &fail_state);
                     
@@ -308,6 +313,7 @@ impl Env<State> for Warehouse {
                 let word = self.process_word(&state, &state);
                 v.push((state, 1.0, word));
             }
+            //println!("{:?} -> {:?}", state, v);
         } else if action == 5 {
             if state.1 == 1 {
                 // this agent is currently carrying something
