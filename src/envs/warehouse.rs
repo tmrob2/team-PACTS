@@ -1,18 +1,19 @@
 use pyo3::prelude::*;
 use hashbrown::{HashMap, HashSet};
-use crate::agent::agent::{MDP, Env};
-use crate::scpm::model::{SCPM, build_model, MOProductMDP};
-use crate::algorithm::synth::{process_scpm, scheduler_synthesis};
-use crate::dfa::dfa::{DFA, Expression};
+use crate::agent::agent::Env;
+use crate::scpm::model::{SCPM, build_model};
+//use crate::algorithm::synth::{process_scpm, scheduler_synthesis};
+//use crate::dfa::dfa::{DFA, Expression};
 use crate::algorithm::dp::value_iteration;
-use crate::{random_sched};
-use pyo3::prelude::*;
+use crate::{generic_scheduler_synthesis, OutputData};
+//use crate::{random_sched};
+//use pyo3::prelude::*;
 use pyo3::exceptions::PyValueError;
 use std::time::Instant;
 //use rand::seq::SliceRandom;
 use rand::prelude::*;
 use rand_chacha::ChaCha8Rng;
-use array_macro::{array};
+use array_macro::array;
 
 //-------
 // Types 
@@ -26,21 +27,37 @@ type State = (Point, u8, Option<Point>);
 #[pyclass]
 #[derive(Clone)]
 pub struct MDPOutputs {
-    pub prod_state_map: HashMap<(i32, i32), HashMap<(State, i32), usize>>
+    pub prod_state_map: HashMap<(i32, i32), HashMap<(State, i32), usize>>,
+    pub schedulers: HashMap<(i32, i32), Vec<f64>>
 }
 
 #[pymethods]
 impl MDPOutputs {
-    #[new]
-    pub fn new() -> MDPOutputs {
-        MDPOutputs {
-            prod_state_map: HashMap::new(),
-        }
+    pub fn get_index(&self, state: State, q: i32, agent: i32, task: i32) -> usize {
+        self.get_index_(state, q, agent, task)
     }
 
-    pub fn get_index(&self, state: State, q: i32, agent: i32, task: i32) -> usize {
-        let map = &self.prod_state_map.get(&(agent, task)).unwrap();
+    pub fn get_action(&self, state: usize, agent: i32, task: i32) -> i32 {
+        self.get_action_(state, agent, task)
+    }
+}
+
+impl OutputData<State> for MDPOutputs {
+    fn get_index_(&self, state: State, q: i32, agent: i32, task: i32) -> usize {
+        let map = 
+            &self.prod_state_map.get(&(agent, task)).unwrap();
         *map.get(&(state, q)).unwrap()
+    }
+
+    fn get_action_(&self, state: usize, agent: i32, task: i32) -> i32 {
+        self.schedulers.get(&(agent, task)).unwrap()[state] as i32
+    }
+
+    fn new_() -> Self {
+        MDPOutputs { 
+            prod_state_map: HashMap::new(),
+            schedulers: HashMap::new()
+        }
     }
 }
 
@@ -378,8 +395,33 @@ where Warehouse: Env<State> {
         model.tasks.size
     );
     println!("r: {:?}", r);
+    println!("{:?}", t1.elapsed());
     let mut pmap: HashMap<(i32, i32), HashMap<(State, i32), usize>> = HashMap::new();
     pmap.insert((0, 0), pmdp.state_map);
     outputs.prod_state_map = pmap;
     (pi, outputs)
+}
+
+
+#[pyfunction]
+#[pyo3(name="scheduler_synth")]
+pub fn warehouse_scheduler_synthesis(
+    model: &SCPM,
+    env: &mut Warehouse,
+    w: Vec<f64>,
+    target: Vec<f64>,
+    eps: f64
+) -> (
+    Vec<f64>, 
+    HashMap<usize, HashMap<(i32, i32), Vec<f64>>>, 
+    Vec<f64>,
+    MDPOutputs
+) {
+    // To construct a warehouse scheduler synthesis which is a wrapper around
+    // the generic scheduler synthesis
+    let result = 
+        generic_scheduler_synthesis(model, env, w, eps, target);
+    
+    // wrap the result into a PyValueError
+    result.unwrap()
 }

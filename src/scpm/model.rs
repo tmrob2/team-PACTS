@@ -299,7 +299,7 @@ impl SCPM {
     where S: Copy + std::fmt::Debug + Hash + Eq, E: Env<S> {
 
         // TODO: because memory is very cheap now, we can implement
-        // multithreading to crease the product MDP models
+        // multithreading to create the product MDP models
         let mut output: Vec<MOProductMDP<S>> = Vec::new();
         //let initial_state: (i32, i32) = (0, 0);
         let nobjs = self.num_agents + self.tasks.size;

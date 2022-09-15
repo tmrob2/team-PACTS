@@ -12,11 +12,12 @@ pub mod envs;
 
 use std::hash::Hash;
 use std::mem;
+use agent::agent::Env;
 use pyo3::prelude::*;
 //use pyo3::exceptions::PyValueError;
 use hashbrown::HashMap;
-use scpm::model::{SCPM}; // , MOProductMDP};
-//use algorithm::synth::{process_scpm, scheduler_synthesis};
+use scpm::model::SCPM; // , MOProductMDP};
+use algorithm::synth::{scheduler_synthesis};
 //test_scpm, warehouse_scheduler_synthesis
 use envs::warehouse::{Warehouse, test_prod, MDPOutputs};
 //use agent::agent::{MDP};
@@ -29,6 +30,7 @@ use cblas_sys::{cblas_dcopy, cblas_dgemv, cblas_dscal, cblas_ddot};
 //use algorithm::dp::value_iteration;
 use float_eq::float_eq;
 use std::fs;
+use pyo3::exceptions::PyValueError;
 
 
 const UNSTABLE_POLICY: i32 = 5;
@@ -423,41 +425,63 @@ fn new_target(
     Ok(result)
 }
 
+//--------------------------------------
+// Python Outputs Trait
+//--------------------------------------
+pub trait OutputData<S> {
+    fn get_index_(&self, state: S, q: i32, agent: i32, task: i32) -> usize;
+
+    fn get_action_(&self, state: usize, agent: i32, task: i32) -> i32;
+
+    fn new_() -> Self;
+}
 
 //--------------------------------------
 // Some testing functions for python testing of Rust API
 //--------------------------------------
 
-//#[pyfunction]
-//#[pyo3(name="scheduler_synthesis")]
-//fn meta_scheduler_synthesis(
-//    model: &SCPM, 
-//    w: Vec<f64>, 
-//    eps: f64, 
-//    target: Vec<f64>,
-//    mdp_transitions: HashMap<(i32, u8), Vec<(i32, f64, String)>>
-//) -> PyResult<(Vec<f64>, usize)> {
-//    let prods = model.construct_products(&mdp_transitions);
-//    let (_pis, alloc, t_new, l) = scheduler_synthesis(model, &w[..], &eps, &target[..], prods);
-//    //println!("{:?}", pis);
-//    //println!("alloc: \n{:.3?}", alloc);
-//    // convert output schedulers to 
-//    // we need to construct the randomised scheduler here, then the output from the randomised
-//    // scheduler, which will already be from a python script, will be the output of this function
-//    let weights = random_sched(alloc, t_new.to_vec(), l, model.tasks.size, model.num_agents);
-//    match weights {
-//        Some(w) => { return Ok((w, l)) }
-//        None => { 
-//            return Err(PyValueError::new_err(
-//                format!(
-//                    "Randomised scheduler weights could not be found for 
-//                    target vector: {:?}", 
-//                    t_new)
-//                )
-//            )
-//        }
-//    }
-//}
+fn generic_scheduler_synthesis<E, S, O>(
+    model: &SCPM,
+    env: &mut E, 
+    w: Vec<f64>, 
+    eps: f64, 
+    target: Vec<f64>
+) -> Result<(
+    Vec<f64>, 
+    HashMap<usize, HashMap<(i32, i32), Vec<f64>>>, 
+    Vec<f64>,
+    O
+), String>
+where S: Copy + std::fmt::Debug + Hash + Eq + Send + Sync + 'static, 
+    E: Env<S>, O: OutputData<S> {
+    // TODO: The return from this might not be enough
+    let mut outputs: O = O::new_();
+    let prods = model.construct_products(env);
+
+    // todo input the "outputs" into the scheduler synthesis algorithm to capture data
+    let (
+        pis, 
+        alloc, 
+        t_new, l
+    ) = scheduler_synthesis(model, &w[..], &eps, &target[..], prods);
+    //println!("{:?}", pis);
+    //println!("alloc: \n{:.3?}", alloc);
+    // convert output schedulers to 
+    // we need to construct the randomised scheduler here, then the output from the randomised
+    // scheduler, which will already be from a python script, will be the output of this function
+    let weights = random_sched(
+        alloc, t_new.to_vec(), l, model.tasks.size, model.num_agents
+    );
+    match weights {
+        Some(w) => { return Ok((w, pis, t_new, outputs)) }
+        None => { 
+            return Err(format!(
+                "Randomised scheduler weights could not be found for target vector: {:?}", 
+                t_new
+            ))
+        }
+    }
+}
 
 /// A Python module implemented in Rust.
 #[pymodule]
