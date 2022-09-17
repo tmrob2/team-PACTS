@@ -5,8 +5,6 @@ import ce
 import random
 import numpy as np
 import random
-import json
-import logging
 from enum import Enum
 import itertools
 
@@ -15,6 +13,7 @@ import itertools
 #
 NUM_TASKS = 2
 NUM_AGENTS = 2
+
 
 # ------------------------------------------------------------------------------
 # SETUP: Construct the structures for agent to recognise task progress
@@ -31,7 +30,7 @@ class AgentWorkingStatus:
 
 # Set the initial agent locations up front
 # We can set the feed points up front as well because they are static
-init_agent_positions = [(0, 0)]
+init_agent_positions = [(0, 0), (9, 9)]
 size = 10
 feedpoints = [(size - 1, size // 2)]
 print("Feed points", feedpoints)
@@ -58,6 +57,12 @@ print("random task racks: ", env.warehouse_api.task_racks)
 obs = env.reset()
 print("Initial observations: ", obs)
 print("Agent rack positions: ", env.agent_rack_positions)
+
+# ------------------------------------------------------------------------------
+# Executor: Define a new executor which will be used to continually run agents
+# ------------------------------------------------------------------------------
+
+executor = ce.Executor(NUM_AGENTS)
 
 # ------------------------------------------------------------------------------
 # Tasks: Construct a DFA transition function and build the Mission from this
@@ -124,51 +129,55 @@ dfa = warehouse_replenishment_task()
 for k in range(NUM_TASKS):
     mission.add_task(dfa)
 # specify the storage outputs for the executor to access data accoss the MOTAP interface
-outputs = ce.MDPOutputs()
 
-## ------------------------------------------------------------------------------
-## SCPM: Construct the SCPM structure which is a set of instructions on how to order the
-## product MDPs
-## ------------------------------------------------------------------------------
-#
-## Solve the product Model
+# ------------------------------------------------------------------------------
+# SCPM: Construct the SCPM structure which is a set of instructions on how to order the
+# product MDPs
+# ------------------------------------------------------------------------------
+
+# Solve the product Model
 scpm = ce.SCPM(mission, NUM_AGENTS, list(range(6)))
 w = [0] * NUM_AGENTS + [1./ NUM_TASKS] * NUM_TASKS
 eps = 0.00001
+target = [-75, -56, 0.8, 0.8]
 #
 #
 #
-(pi, outputs) = ce.construct_prod_test(
-    scpm, env.warehouse_api, w, eps, outputs
-)
+tnew = ce.scheduler_synth(scpm, env.warehouse_api, w, target, eps, executor)
+
+
 ## ------------------------------------------------------------------------------
 ## Execution: Construct a DFA transition function and build the Mission from this
 ## ------------------------------------------------------------------------------
 #
-#Q = [0] * NUM_TASKS
-#agent_task_status = AgentWorkingStatus.NOT_WORKING
-#agent_working_on_tasks = None 
-#
-## There is only once allocation, and it is (0, 0)
-#
-## Check from the mission whether it is complete or not
-#while not mission.check_mission_complete():
-##for _ in range(100):
-#    # Specify that the agent is currently not working and that it may pick up a task
-#    actions = [-1]
-#    j = 0 # TODO how do we keep track of the task that the agent is working on
-#    print("lookup state: ", env.get_state(0))
-#    sidx = outputs.get_index(env.get_state(0), Q[0], 0, 0)
-#    #print(f"lookup state: s, {mdp_lookup_state}, q: {Q[0]}: sidx: {sidx}")
-#    actions[0] = int(pi[sidx])
-#
-#    # Step the agent forward
-#    obs, rewards, dones, info = env.step(actions)
-#
-#    # Now we need to get the next DFA step for both of the tasks
-#    # First get the word for the new observations 
-#    #print(f"New word for agent: {0} q, s': {obs[0]} is {word}")
-#    # step the task DFA forward
-#    qprime = mission.step(j, Q[j], info["word"])
-#    Q[j] = qprime#
-#    print(f"Agent {0} state: {(obs[0]['a'], obs[0]['c'], env.agent_rack_positions[0])} -> idx: {sidx}, action: {int(pi[sidx])}, word: {info['word']}, Q: {Q}")
+agent_task_status = [AgentWorkingStatus.NOT_WORKING] * NUM_AGENTS
+while True:
+    actions = [6] * NUM_AGENTS
+    for agent in range(NUM_AGENTS):
+        if agent_task_status[agent] == AgentWorkingStatus.NOT_WORKING:
+            task = executor.get_next_task(agent)
+            env.agent_performing_task[agent] = task
+            agent_task_status[agent] = AgentWorkingStatus.WORKING
+        else:
+            # Check if the agent's task has been completed
+            pass
+        # With the current task check what the dfa state is
+        if env.agent_performing_task[agent] is not None:
+            q = executor.dfa_current_state(env.agent_performing_task[agent])
+            env.warehouse_api.set_task_(env.agent_performing_task[agent])
+            #print("lookup state: ", env.get_state(agent), "task", agent_performings_task[agent], "q", q)
+            actions[agent] = executor.get_action(agent, env.agent_performing_task[agent], env.states[agent], q)
+
+            # step the agent forward one timestep
+    obs, rewards, dones, info = env.step(actions)
+    print("words", info)
+
+    # Step the DFA forward
+    for agent in range(NUM_AGENTS):
+        current_task = env.agent_performing_task[agent]
+        if current_task is not None:
+            q = executor.dfa_current_state(current_task)
+            executor.dfa_next_state(current_task, q, info[agent]["word"])
+            qprime = executor.dfa_current_state(current_task)
+            #print(f"Agent {0} state: {(obs[0]['a'], obs[0]['c'], env.agent_rack_positions[0])}"
+            #      f"-> , action: {actions[agent]}, word: {info[agent]['word']}, Q': {qprime}")

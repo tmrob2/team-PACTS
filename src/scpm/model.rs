@@ -2,8 +2,8 @@
 
 use hashbrown::{HashMap, HashSet};
 use pyo3::prelude::*;
-use crate::agent::agent::{MDP, Env};
-use crate::dfa::dfa::{DFA, Mission, Expression};
+use crate::agent::agent::{Env};
+use crate::dfa::dfa::{DFA, Mission};
 use std::collections::VecDeque;
 use crate::*;
 

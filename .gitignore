@@ -1,3 +1,5 @@
 /target
 /Cargo.lock
-warehouse/envs/__pycache__/warehouse.cpython-38.pyc
+warehouse/envs/__pycache__/warehouse.cpython*
+warehouse/__pycache__  
+warehouse/warehouse.egg-info/

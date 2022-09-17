@@ -27,6 +27,7 @@ def hyperplane_solver(X, t, nobj):
     solution = [value(w[i]) for i in range(nobj)]
     return solution
 
+
 import cvxpy as cp
 
 def eucl_new_target(X, W, t, l, n):
@@ -42,9 +43,10 @@ def eucl_new_target(X, W, t, l, n):
         constraints.append(np.dot(W[k], X[k]) >= W[k] @ z)
 
     for i in range(n, len(t)):
-        constraints.append(z[i] >= max(t[i] - 0.01, 0.))
+        constraints.append(z[i] >= max(t[i] - 0.2, 0.))
     
     prob = cp.Problem(cp.Minimize(obj), constraints)
+    print(prob)
     prob.solve()
     print("status", prob.status)
     print("optimal value", prob.value)

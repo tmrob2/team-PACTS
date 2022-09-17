@@ -53,7 +53,13 @@ pub fn scheduler_synthesis<S>(
     eps: &f64, 
     t: &[f64], 
     prods_: Vec<MOProductMDP<S>>
-) -> (HashMap<usize, HashMap<(i32, i32), Vec<f64>>>, Vec<(i32, i32, i32, Vec<f64>)>, Vec<f64>, usize)
+) -> (
+    HashMap<usize, HashMap<(i32, i32), Vec<f64>>>, 
+    Vec<(i32, i32, i32, Vec<f64>)>, 
+    Vec<f64>, 
+    usize,
+    Vec<MOProductMDP<S>>
+)
 where S: Send + Sync + Copy + Hash + Eq + 'static {
     let t1 = Instant::now();
     //let torig = t.to_vec();
@@ -215,5 +221,5 @@ where S: Send + Sync + Copy + Hash + Eq + 'static {
         }
     }
     println!("Time: {:.3}", t1.elapsed().as_secs_f32());
-    (schedulers, allocation_acc, tnew, count)
+    (schedulers, allocation_acc, tnew, count, prods)
 }

@@ -1,11 +1,11 @@
 use pyo3::prelude::*;
 use hashbrown::{HashMap, HashSet};
 use crate::agent::agent::Env;
+use crate::dfa::dfa::DFA;
 use crate::scpm::model::{SCPM, build_model};
 //use crate::algorithm::synth::{process_scpm, scheduler_synthesis};
-//use crate::dfa::dfa::{DFA, Expression};
 use crate::algorithm::dp::value_iteration;
-use crate::{generic_scheduler_synthesis, OutputData};
+use crate::{generic_scheduler_synthesis};
 //use crate::{random_sched};
 //use pyo3::prelude::*;
 use pyo3::exceptions::PyValueError;
@@ -14,6 +14,7 @@ use std::time::Instant;
 use rand::prelude::*;
 use rand_chacha::ChaCha8Rng;
 use array_macro::array;
+use crate::executor::executor::{DefineExecutor, Execution};
 
 //-------
 // Types 
@@ -24,42 +25,128 @@ type State = (Point, u8, Option<Point>);
 //--------
 // Helpers
 //--------
+
 #[pyclass]
-#[derive(Clone)]
-pub struct MDPOutputs {
-    pub prod_state_map: HashMap<(i32, i32), HashMap<(State, i32), usize>>,
-    pub schedulers: HashMap<(i32, i32), Vec<f64>>
+pub struct Executor {
+    state_maps: HashMap<(i32, i32), HashMap<(State, i32), usize>>,
+    schedulers: HashMap<(i32, i32), Vec<f64>>,
+    agent_task_allocations: HashMap<i32, Vec<i32>>,
+    tasks: HashMap<i32, DFA>
+}
+
+impl DefineExecutor<State> for Executor {
+    fn new_(nagents: usize) -> Self {
+
+        let mut agent_task_alloc: HashMap<i32, Vec<i32>> = HashMap::new();
+        for agent in 0..nagents {
+            agent_task_alloc.insert(agent as i32, Vec::new());
+        }
+        Executor { 
+            state_maps: HashMap::new(), 
+            schedulers: HashMap::new(), 
+            agent_task_allocations: agent_task_alloc,
+            tasks: HashMap::new()
+        }
+    }
+
+    fn get_state_map(&self, agent: i32, task: i32) 
+        -> &HashMap<(State, i32), usize> {
+        self.state_maps.get(&(agent, task)).unwrap()
+    }
+
+    fn set_state_map(&mut self, agent: i32, task: i32, map: HashMap<(State, i32), usize>) {
+        self.state_maps.insert((agent, task), map);
+    }
+
+    fn remove_state_map(&mut self, agent: i32, task: i32) {
+        self.state_maps.remove(&(agent, task));
+    }
+
+    fn get_scheduler(&self, agent: i32, task: i32) -> &[f64] {
+        self.schedulers.get(&(agent, task)).unwrap()
+    }
+
+    fn set_scheduler(&mut self, agent: i32, task: i32, scheduler: Vec<f64>) {
+        self.schedulers.insert((agent, task), scheduler);
+    }
+
+    fn remove_scheduler(&mut self, agent: i32, task: i32) {
+        self.schedulers.remove(&(agent, task));
+    }
+
+    fn get_agent_task_allocations(&self, agent: i32) -> &[i32] {
+        &self.agent_task_allocations.get(&agent).unwrap()[..]
+    }
+
+    fn get_next_task(&mut self, agent: i32) -> Option<i32> {
+        let tasks_remaining = 
+            self.agent_task_allocations.get_mut(&agent).unwrap();
+        tasks_remaining.pop()
+    }
+
+    fn set_agent_task_allocation(&mut self, agent: i32, task: i32) {
+        match self.agent_task_allocations.get_mut(&agent) {
+            Some(t) => {
+                t.push(task);
+            }
+            None => { 
+                self.agent_task_allocations.insert(agent, vec![task]); 
+            }
+        }
+    }
+
+    fn dfa_next_state_(&mut self, task: i32, q: i32, word: String) -> i32 {
+        self.tasks.get_mut(&task).unwrap().next(q, word)
+    }
+
+    fn check_done_(&self, task: i32) -> u8 {
+        self.tasks.get(&task).unwrap().check_done()
+    }
+
+    fn insert_dfa(&mut self,dfa: DFA, task: i32) {
+        self.tasks.insert(task, dfa);
+    }
+
+    fn dfa_current_state_(&self, task: i32) -> i32 {
+        self.tasks.get(&task).unwrap().current_state
+    }
+
+
 }
 
 #[pymethods]
-impl MDPOutputs {
-    pub fn get_index(&self, state: State, q: i32, agent: i32, task: i32) -> usize {
-        self.get_index_(state, q, agent, task)
+impl Executor {
+    #[new]
+    fn new(nagents: usize) -> Self {
+        Executor::new_(nagents)
     }
 
-    pub fn get_action(&self, state: usize, agent: i32, task: i32) -> i32 {
-        self.get_action_(state, agent, task)
+    fn get_next_task(&mut self, agent: i32) -> Option<i32> {
+        self.get_next_task_(agent)
+    }
+
+    fn remove_completed_task_agent(&mut self, agent: i32, task: i32) {
+        self.remove_completed_task_agent_(agent, task);
+    }
+
+    fn get_action(&self, agent: i32, task: i32, state: State, q: i32) -> i32 { 
+        self.get_action_(agent, task, state, q)
+    }
+
+    fn dfa_next_state(&mut self, task: i32, q: i32, word: String) -> i32 {
+        self.dfa_next_state_(task, q, word)
+    }
+
+    fn dfa_current_state(&self, task: i32) -> i32 {
+        self.dfa_current_state_(task)
+    }
+
+    fn dfa_check_done(&self, task: i32) -> u8 {
+        self.check_done_(task)
     }
 }
 
-impl OutputData<State> for MDPOutputs {
-    fn get_index_(&self, state: State, q: i32, agent: i32, task: i32) -> usize {
-        let map = 
-            &self.prod_state_map.get(&(agent, task)).unwrap();
-        *map.get(&(state, q)).unwrap()
-    }
-
-    fn get_action_(&self, state: usize, agent: i32, task: i32) -> i32 {
-        self.schedulers.get(&(agent, task)).unwrap()[state] as i32
-    }
-
-    fn new_() -> Self {
-        MDPOutputs { 
-            prod_state_map: HashMap::new(),
-            schedulers: HashMap::new()
-        }
-    }
-}
+impl Execution<State> for Executor { }
 
 //-----------------
 // Python Interface
@@ -149,7 +236,11 @@ impl Warehouse {
 
     fn set_random_task_feeds(&mut self, ntasks: usize) {
         let mut rnd = ChaCha8Rng::seed_from_u64(self.seed);
-        self.task_feeds = self.feedpoints.choose_multiple(&mut rnd, ntasks).map(|x| *x).collect();
+        for _ in 0..ntasks {
+            let new_feed_ = *self.feedpoints.choose(&mut rnd).unwrap();
+            self.task_feeds.push(new_feed_);
+        };
+        println!("tasks: {}, task feeds: {:?}", ntasks, self.task_feeds);
     }
 
     fn step(&self, state: State, action: u8) -> PyResult<Vec<(State, f64, String)>> {
@@ -162,6 +253,14 @@ impl Warehouse {
             }
         };
         Ok(v)
+    }
+
+    fn set_task_(&mut self, task: usize) {
+        self.set_task(task);
+    }
+
+    fn get_current_task(&self) -> usize {
+        self.current_task.unwrap()
     }
 }
 
@@ -342,6 +441,10 @@ impl Env<State> for Warehouse {
                 let word = self.process_word(&state, &state);
                 v.push((state, 1.0, word));
             }
+        } else if action == 6 {
+            // do nothing
+            let word = self.process_word(&state, &state);
+            v.push((state, 1.0, word));
         } else {
             return Err("action not registered".to_string())
         }
@@ -359,7 +462,6 @@ impl Env<State> for Warehouse {
     }
 }
 
-
 #[pyfunction]
 #[pyo3(name="construct_prod_test")]
 pub fn test_prod(
@@ -367,8 +469,8 @@ pub fn test_prod(
     env: &mut Warehouse,
     w: Vec<f64>,
     eps: f64,
-    mut outputs: MDPOutputs
-) -> (Vec<f64>, MDPOutputs)
+    //mut outputs: MDPOutputs
+) -> Vec<f64> //(Vec<f64>, MDPOutputs)
 where Warehouse: Env<State> {
     let t1 = Instant::now();
     println!("Constructing MDP of agent environment");
@@ -398,30 +500,30 @@ where Warehouse: Env<State> {
     println!("{:?}", t1.elapsed());
     let mut pmap: HashMap<(i32, i32), HashMap<(State, i32), usize>> = HashMap::new();
     pmap.insert((0, 0), pmdp.state_map);
-    outputs.prod_state_map = pmap;
-    (pi, outputs)
+    //outputs.prod_state_map = pmap;
+    pi
+    //(pi, outputs)
 }
 
 
 #[pyfunction]
 #[pyo3(name="scheduler_synth")]
 pub fn warehouse_scheduler_synthesis(
-    model: &SCPM,
+    model: &mut SCPM,
     env: &mut Warehouse,
     w: Vec<f64>,
     target: Vec<f64>,
-    eps: f64
-) -> (
-    Vec<f64>, 
-    HashMap<usize, HashMap<(i32, i32), Vec<f64>>>, 
-    Vec<f64>,
-    MDPOutputs
-) {
+    eps: f64,
+    executor: &mut Executor
+) -> PyResult<Vec<f64>> {
     // To construct a warehouse scheduler synthesis which is a wrapper around
     // the generic scheduler synthesis
     let result = 
-        generic_scheduler_synthesis(model, env, w, eps, target);
+        generic_scheduler_synthesis(model, env, w, eps, target, executor);
     
     // wrap the result into a PyValueError
-    result.unwrap()
+    match result {
+        Ok(r) => { Ok(r) }
+        Err(e) => Err(PyValueError::new_err(e))
+    }
 }

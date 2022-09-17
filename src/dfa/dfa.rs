@@ -19,11 +19,12 @@ pub struct DFA {
     #[pyo3(get)]
     pub done: Vec<i32>,
     pub transitions: HashMap<(i32, String), i32>,
-    current_state: i32,
+    pub current_state: i32,
     words: HashSet<String>
 }
 
-/// Supply a convenience trait so that we can simply or create words in the environment
+/// Supply a convenience trait so that we can simply or create 
+/// words in the environment
 pub trait Expression<D> {
     fn conversion(&self, q: i32, data: &D) -> String;
 }
@@ -38,7 +39,7 @@ impl DFA {
         rejecting: Vec<i32>, 
         done: Vec<i32>
     ) -> Self {
-        DFA{
+        DFA {
             states, 
             name: "task".to_string(),
             initial_state, 
@@ -61,11 +62,14 @@ impl DFA {
         }
     }
 
-    fn next(&mut self, state: i32, word: String) -> i32 {
-        *self.transitions.get(&(state, word)).unwrap()
+    pub fn next(&mut self, state: i32, word: String) -> i32 {
+        let qprime = *self.transitions.get(&(state, word.to_string())).unwrap();
+        //println!("state: {}, word: {:?} -> q' {}", state, word, qprime);
+        self.current_state = qprime;
+        self.current_state
     }
 
-    fn check_done(&self) -> u8 {
+    pub fn check_done(&self) -> u8 {
         if self.accepting.contains(&self.current_state) {
             2
         } else if self.rejecting.contains(&self.current_state) {
@@ -95,10 +99,6 @@ impl DFA {
         }
     }
 
-    fn print_transitions(&self, words: Vec<String>) {
-        println!("{:?}", self.transitions);
-    }
-
     fn json_serialize_dfa(&self) -> String {
         serde_json::to_string(&self).unwrap()
     }
@@ -110,16 +110,6 @@ pub fn json_deserialize_from_string(s: String) -> DFA {
     let task: DFA = serde_json::from_str(&s).unwrap();
     task
 }
-
-//impl DFA {
-//    pub fn construct_transition_hashmap(&self) -> HashMap<(i32, String), i32> {
-//        let mut map: HashMap<(i32, String), i32> = HashMap::new();
-//        for (q, w, qprime) in self.transitions.iter() {
-//            map.insert((*q, w.to_string()), *qprime);
-//        }
-//        map
-//    }
-//}
 
 #[pyclass]
 #[derive(Clone)]
@@ -177,5 +167,9 @@ impl Mission {
             }
         }
         return complete
+    }
+
+    pub fn release_last_dfa(&mut self) -> Option<DFA> {
+        self.tasks.pop()
     }
 }

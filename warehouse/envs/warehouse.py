@@ -36,6 +36,7 @@ class Warehouse(gym.Env):
         self.agent_rack_positions = [None] * nagents
         self.orig_rack_positions = [None] * nagents
         self.states = [(initial_agent_loc[i], 0, None) for i in range(nagents)]
+        self.agent_performing_task = [None] * nagents
         # agent locations
 
         # Observations are dictionaries with the agent's and target's locatoin
@@ -102,16 +103,18 @@ class Warehouse(gym.Env):
         observations = {}
         rewards = []
         dones = []
-        info = {}
+        info = {k: {} for k in range(self.warehouse_api.nagents)}
 
         for agent in range(self.warehouse_api.nagents):
             # get the current agent state
             # The return from the warehouse call will be a List[(state, prob, word)]
             # but for a gym environment we need to pick one of those weights 
             # according to the probability distributed returned.
-            print("state: ", self.states[agent])
+            #print("state: ", self.states[agent], "action", action[agent])
+            if self.agent_performing_task[agent] is not None:
+                self.warehouse_api.set_task_(self.agent_performing_task[agent])
             v = self.warehouse_api.step(self.states[agent], action[agent])
-            print("return from Rust", v)
+            print("return from Rust", v, "task: ", self.warehouse_api.task_racks[self.warehouse_api.get_current_task()])
             # choose one of the v, 
             ind = random.choices(
                 list(range(len(v))), weights=[sprime[1] for sprime in v]
@@ -125,7 +128,7 @@ class Warehouse(gym.Env):
             if self.orig_rack_positions[agent] is not None:
                 if v[ind0][2][-1] == "D" and v[ind0][0][0] == self.orig_rack_positions[agent]:
                     self.orig_rack_positions[agent] = None
-            info["word"] = v[ind0][2]
+            info[agent]["word"] = v[ind0][2]
             rewards.append(-1)
             dones=[False, False]
             if v[ind0][0][2] is not None:
