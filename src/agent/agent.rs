@@ -4,7 +4,7 @@ use hashbrown::HashMap;
 pub trait Env<S> {
     fn step_(&self, s: S, action: u8) -> Result<Vec<(S, f64, String)>, String>;
 
-    fn get_init_state(&self) -> S;
+    fn get_init_state(&self, agent: usize) -> S;
 
     fn set_task(&mut self, task_id: usize);
 }

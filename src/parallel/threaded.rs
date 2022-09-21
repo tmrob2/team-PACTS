@@ -55,6 +55,8 @@ where S: Send + Sync + Copy + Hash + Eq + 'static {
         mo_exp_cost[mdp.agent_id as usize] = r[0];
         mo_exp_cost[num_agents + mdp.task_id as usize] = r[1];
         let exp_w_tot_cost = blas_dot_product(&mo_exp_cost[..], w);
+        println!("agent: {}, task: {}, multiplied: {:?} x {:?} = {:.3}", 
+            mdp.agent_id, mdp.task_id, mo_exp_cost, w, exp_w_tot_cost);
         // then multiply by w to get to 
         match result.get_mut(&mdp.task_id) {
             Some(v) => {
@@ -68,7 +70,7 @@ where S: Send + Sync + Copy + Hash + Eq + 'static {
         mdp_return_vec.push(mdp);
     }
 
-    //println!("allocation hashmap: \n{:?}", alloc_map);
+    println!("allocation hashmap: \n{:?}", alloc_map);
     
     //println!("time: {:?}, Result: {:.2?} \n {:?}", t1.elapsed().as_secs_f64(), result, pis);
     Ok((mdp_return_vec, pis, alloc_map, result))

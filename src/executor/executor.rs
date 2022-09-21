@@ -283,7 +283,7 @@ where S: Copy + Eq + std::hash::Hash + std::fmt::Debug {
     }
 
     fn get_action_(&self, agent: i32, task: i32, state: S, q: i32) -> i32 {
-        println!("state: {:?}, q: {}", state, q);
+        //println!("state: {:?}, q: {}", state, q);
         let sidx = *self.get_state_map(agent, task).get(&(state, q)).expect(&format!("failed at {:?}", (state, q)));
         let action = self.get_scheduler(agent, task)[sidx] as i32;
         action

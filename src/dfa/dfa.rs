@@ -70,7 +70,7 @@ impl DFA {
     }
 
     pub fn check_done(&self) -> u8 {
-        if self.accepting.contains(&self.current_state) {
+        if self.done.contains(&self.current_state) {
             2
         } else if self.rejecting.contains(&self.current_state) {
             3

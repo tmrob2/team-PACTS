@@ -59,18 +59,20 @@ obs = env.reset()
 print("Initial observations: ", obs)
 print("Agent rack positions: ", env.agent_rack_positions)
 
+executor = ce.Executor(NUM_AGENTS)
+
 # ------------------------------------------------------------------------------
 # Tasks: Construct a DFA transition function and build the Mission from this
 # ------------------------------------------------------------------------------
 
 def warehouse_replenishment_task():
-    task = ce.DFA(list(range(0, 8)), 0, [5], [6], [7])
+    task = ce.DFA(list(range(0, 8)), 0, [5], [7], [6])
     # attempt to goto the rack positon without carrying anything
     omega = set(env.warehouse_api.words)
 
     # The first transition determines if the label is at the rack
     task.add_transition(0, "R_NC", 1)
-    excluded_words = ['_'.join(x) for x in list(itertools.product(["R", "NFR", "F"], ["P", "D", "C"]))]
+    excluded_words = ['_'.join(x) for x in list(itertools.product(["R", "NFR", "F"], ["P", "D", "CR", "CNR"]))]
     for w in excluded_words: 
         task.add_transition(0, f"{w}", 7)
     excluded_words.append("R_NC")
@@ -86,20 +88,20 @@ def warehouse_replenishment_task():
     for w in omega.difference(set(excluded_words)):
         task.add_transition(1, f"{w}", 1)
     # The third transition takes the agent to the feed position while carrying
-    task.add_transition(2, "F_C", 3)
-    excluded_words = ['_'.join(x) for x in list(itertools.product(["F", "R", "NFR"], ["NC", "P", "D"]))]
+    task.add_transition(2, "F_CNR", 3)
+    excluded_words = ['_'.join(x) for x in list(itertools.product(["F", "R", "NFR"], ["NC", "P", "D", "CR"]))]
     for w in excluded_words:
         task.add_transition(2, f"{w}", 7)
-    excluded_words.append("F_C")
+    excluded_words.append("F_CNR")
     for w in omega.difference(set(excluded_words)):
         task.add_transition(2, f"{w}", 2)
     # The fourth transition takes the agent from the feed position while carrying 
     # back to the rack position
-    task.add_transition(3, "R_C", 4)
-    excluded_words = ['_'.join(x) for x in list(itertools.product(["F", "R", "NFR"], ["NC", "P", "D"]))]
+    task.add_transition(3, "R_CNR", 4)
+    excluded_words = ['_'.join(x) for x in list(itertools.product(["F", "R", "NFR"], ["NC", "P", "D", "CR"]))]
     for w in excluded_words:
         task.add_transition(3, f"{w}", 7)
-    excluded_words.append("R_C")
+    excluded_words.append("R_CNR")
     for w in omega.difference(set(excluded_words)):
         task.add_transition(3, f"{w}", 3)
     # The fifth transition tells the agent to drop the rack at the required square
@@ -122,8 +124,6 @@ mission = ce.Mission()
 dfa = warehouse_replenishment_task()
 # Add the task to the mission
 mission.add_task(dfa)
-# specify the storage outputs for the executor to access data accoss the MOTAP interface
-outputs = ce.MDPOutputs()
 
 ## ------------------------------------------------------------------------------
 ## SCPM: Construct the SCPM structure which is a set of instructions on how to order the
@@ -137,37 +137,9 @@ eps = 0.00001
 #
 #
 #
-(pi, outputs) = ce.construct_prod_test(
-    scpm, env.warehouse_api, w, eps, outputs
+pi = ce.construct_prod_test(
+    scpm, env.warehouse_api, w, eps
 )
 ## ------------------------------------------------------------------------------
 ## Execution: Construct a DFA transition function and build the Mission from this
 ## ------------------------------------------------------------------------------
-#
-Q = [0] * 1
-agent_task_status = AgentWorkingStatus.NOT_WORKING
-agent_working_on_tasks = None 
-
-# There is only once allocation, and it is (0, 0)
-
-# Check from the mission whether it is complete or not
-while not mission.check_mission_complete():
-#for _ in range(100):
-    # Specify that the agent is currently not working and that it may pick up a task
-    actions = [-1]
-    j = 0 # TODO how do we keep track of the task that the agent is working on
-    print("lookup state: ", env.get_state(0))
-    sidx = outputs.get_index(env.get_state(0), Q[0], 0, 0)
-    #print(f"lookup state: s, {mdp_lookup_state}, q: {Q[0]}: sidx: {sidx}")
-    actions[0] = int(pi[sidx])
-
-    # Step the agent forward
-    obs, rewards, dones, info = env.step(actions)
-
-    # Now we need to get the next DFA step for both of the tasks
-    # First get the word for the new observations 
-    #print(f"New word for agent: {0} q, s': {obs[0]} is {word}")
-    # step the task DFA forward
-    qprime = mission.step(j, Q[j], info["word"])
-    Q[j] = qprime#
-    print(f"Agent {0} state: {(obs[0]['a'], obs[0]['c'], env.agent_rack_positions[0])} -> idx: {sidx}, action: {int(pi[sidx])}, word: {info['word']}, Q: {Q}")

@@ -1,10 +1,12 @@
 use hashbrown::{HashMap, HashSet};
+use rand::seq::SliceRandom;
 use crate::scpm::model::{SCPM, MOProductMDP};
 use crate::{Mantissa, blas_dot_product, val_or_zero_one, solver, new_target};
 //use pyo3::prelude::*;
 use crate::parallel::threaded::process_mdps;
 use std::time::Instant;
 use std::hash::Hash;
+use rand::thread_rng;
 
 //#[pyfunction]
 //#[pyo3(name="para_test")]
@@ -20,14 +22,21 @@ where S: Send + Sync + Copy + Hash + Eq + 'static {
     // which processes them and then return those models again for reprocessing
     let num_agents = model.num_agents;
     let num_tasks = model.tasks.size;
-    let (prods, mut pis, alloc_map, mut result) = process_mdps(
+    let (prods, 
+        mut pis, 
+        alloc_map, 
+        mut result) = process_mdps(
         prods, &w[..], &eps, num_agents, num_tasks
     ).unwrap();
     
     let mut r = vec![0.; num_agents + num_tasks];
     let mut alloc: Vec<(i32, i32, Vec<f64>)> = Vec::new();
+    println!("result: {:?}", result);
     for task in 0..model.tasks.size {
         let v_tot_cost = result.get_mut(&(task as i32)).unwrap(); // <- this will be a vector (agent, weighted cost)
+        // First try randomly permuting v_tot_cost to see if this solves the problem
+        // of one agent being allocated everything
+        v_tot_cost.shuffle(&mut thread_rng());
         // sort the vector of (agent, tot cost) by cost
         v_tot_cost.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap()); // reflects maximisation
         // get the allocation multi-objective vector for the task and add it to r
@@ -45,7 +54,6 @@ where S: Send + Sync + Copy + Hash + Eq + 'static {
     }
     (r, prods, pis, alloc)
 }
-
 
 pub fn scheduler_synthesis<S>(
     model: &SCPM, 
@@ -71,7 +79,7 @@ where S: Send + Sync + Copy + Hash + Eq + 'static {
     let mut weights: HashMap<usize, Vec<f64>> = HashMap::new();
     let mut weights_v: Vec<Vec<f64>> = Vec::new();
     let mut temp_weights_: Vec<Vec<f64>>;
-    let mut X: HashSet<Vec<Mantissa>> = HashSet::new();
+    //let mut X: HashSet<Vec<Mantissa>> = HashSet::new();
     let mut W: HashSet<Vec<Mantissa>> = HashSet::new();
     let mut schedulers: HashMap<usize, HashMap<(i32, i32), Vec<f64>>> = HashMap::new();
     let mut allocation_acc: Vec<(i32, i32, i32, Vec<f64>)> = Vec::new();
@@ -97,7 +105,7 @@ where S: Send + Sync + Copy + Hash + Eq + 'static {
 
     schedulers.insert(0, pis);
 
-    X.insert(r.iter().cloned().map(|f| Mantissa::new(f)).collect::<Vec<Mantissa>>());
+    //X.insert(r.iter().cloned().map(|f| Mantissa::new(f)).collect::<Vec<Mantissa>>());
     W.insert(w.iter().cloned().map(|f| Mantissa::new(f)).collect::<Vec<Mantissa>>());
     //println!("r init: {:.3?}", r);
     let wrl = blas_dot_product(&r[..], &w[..]);
@@ -138,7 +146,7 @@ where S: Send + Sync + Copy + Hash + Eq + 'static {
     let mut lpvalid = true;
     let tot_objs = model.num_agents + model.tasks.size;
 
-    let mut w: Vec<f64> = vec![0.; tot_objs];
+    //let mut w: Vec<f64> = vec![0.; tot_objs];
     prods = prods_;
     let mut count: usize = 1;
     
@@ -147,16 +155,15 @@ where S: Send + Sync + Copy + Hash + Eq + 'static {
         let lpresult = solver(hullset_X.to_vec(), tnew.to_vec(), tot_objs);
         //println!("LP result: {:.2?}", lpresult);
         match lpresult {
-            Ok(sol) => {
-                for (ix, val) in sol.iter().enumerate() {
+            Ok(_sol) => {
+                /*for (ix, val) in sol.iter().enumerate() {
                     if ix < tot_objs {
                         //println!(" w[{:?}] = {:.3}", ix, val);
                         w[ix] = val_or_zero_one(val);
                     }
-                }
+                }*/
                 let new_w = w
                     .iter()
-                    .clone()
                     .map(|f| Mantissa::new(*f))
                     .collect::<Vec<Mantissa>>();
                 match W.contains(&new_w) {

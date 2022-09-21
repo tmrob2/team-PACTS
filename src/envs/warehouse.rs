@@ -169,7 +169,7 @@ pub struct Warehouse {
     #[pyo3(get)]
     pub task_feeds: Vec<Point>,
     #[pyo3(get)]
-    pub words: [String; 12],
+    pub words: [String; 20],
     pub seed: u64
 }
 
@@ -189,9 +189,9 @@ impl Warehouse {
         for (i, act) in actions_to_dir.into_iter().enumerate() {
             action_map.insert(i as u8, act);
         }
-        let w0: [String; 3] = ["R".to_string(), "F".to_string(), "NFR".to_string()];
-        let w1: [String; 4] = ["P".to_string(), "D".to_string(), "C".to_string(), "NC".to_string()];
-        let mut words: [String; 12] = array!["".to_string(); 12];
+        let w0: [String; 4] = ["R".to_string(), "F".to_string(), "FR".to_string(), "NFR".to_string()];
+        let w1: [String; 5] = ["P".to_string(), "D".to_string(), "CR".to_string(), "CNR".to_string(), "NC".to_string()];
+        let mut words: [String; 20] = array!["".to_string(); 20];
         let mut count: usize = 0;
         for wa in w0.iter() {
             for wb in w1.iter() {
@@ -324,10 +324,23 @@ impl Warehouse {
             // add drop
             word[1] = "D";
         } else if current_state.1 == 1 && new_state.1 == 1 {
-            word[1] = "C"
+            let current_task = self.get_current_task();
+            if self.racks.contains(&new_state.0) {
+                // this is a problem...but only if the rack is not the task rack
+                if self.task_racks[current_task] == new_state.0 {
+                    // this is fine
+                    word[1] = "CNR";
+                } else {
+                    word[1] = "CR";
+                }
+            } else {
+                word[1] = "CNR";
+            }
         } else {
-            word[1] = "NC"
+            word[1] = "NC";
         }
+
+    
         if new_state.0 == self.task_racks[self.current_task.unwrap()] {
             // then the rack is in position
             word[0] = "R";
@@ -345,6 +358,7 @@ impl Warehouse {
 
 impl Env<State> for Warehouse {
     fn step_(&self, state: State, action: u8) -> Result<Vec<(State, f64, String)>, String> {
+        let psuccess :f64 = 0.999;
         let mut v: Vec<(State, f64, String)> = Vec::new();
         if vec![0, 1, 2, 3].contains(&action) {
             let direction: &[i8; 2] = self.action_to_dir.get(&action).unwrap();
@@ -380,8 +394,8 @@ impl Env<State> for Warehouse {
                         let fail_state: State = (agent_new_loc, 0, state.2);
                         let fail_word = self.process_word(&state, &fail_state);
 
-                        v.push((success_state, 0.99, success_word));
-                        v.push((fail_state, 0.01, fail_word));
+                        v.push((success_state, psuccess, success_word));
+                        v.push((fail_state, 1. - psuccess, fail_word));
                     }
                 } else {
                     // Define the failure scenario
@@ -394,8 +408,8 @@ impl Env<State> for Warehouse {
                     let fail_state: State = (agent_new_loc, 0, state.2);
                     let fail_word = self.process_word(&state, &fail_state);
                     
-                    v.push((success_state, 0.99, success_word));
-                    v.push((fail_state, 0.01, fail_word));
+                    v.push((success_state, psuccess, success_word));
+                    v.push((fail_state, 1. - psuccess, fail_word));
                 }
             };
         } else if action == 4 {
@@ -434,7 +448,7 @@ impl Env<State> for Warehouse {
             if state.1 == 1 {
                 // this agent is currently carrying something
                 // therefore, drop the rack at the current agent position
-                let new_state = (state.0, 0, Some(state.0));
+                let new_state = (state.0, 0, None);
                 let word = self.process_word(&state, &new_state);
                 v.push((new_state, 1.0, word));
             } else {
@@ -451,9 +465,9 @@ impl Env<State> for Warehouse {
         Ok(v)
     }
 
-    fn get_init_state(&self) -> State {
+    fn get_init_state(&self, agent: usize) -> State {
         // with the current task construct the initial state
-        let agent_pos = self.agent_initial_locs[self.current_task.unwrap()];
+        let agent_pos = self.agent_initial_locs[agent as usize];
         (agent_pos, 0, None)
     }
 
@@ -477,7 +491,7 @@ where Warehouse: Env<State> {
     //model.construct_products(&mut mdp);
     env.set_task(0);
     let pmdp = build_model(
-        (env.get_init_state(), 0), 
+        (env.get_init_state(0), 0), 
         env,
         &model.tasks.get_task(0), 
         0, 

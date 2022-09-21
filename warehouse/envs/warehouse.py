@@ -8,7 +8,16 @@ import ce
 import random
 
 class Warehouse(gym.Env):
-    metadata = {"render_modes": ["human", "rgb_array", "single_rgb_array"], "render_fps": 1}
+    metadata = {"render_modes": ["human", "rgb_array", "single_rgb_array"], "render_fps": 10}
+
+    class TaskStatus: 
+        INPROGESS = 0
+        SUCCESS = 1
+        FAIL = 2
+
+    class AgentWorkingStatus:
+        NOT_WORKING = 0
+        WORKING = 1
 
     def __init__(
         self, 
@@ -34,9 +43,11 @@ class Warehouse(gym.Env):
 
         self.agent_obs = [{"a": aloc, "c": 0, "r": None} for aloc in initial_agent_loc]
         self.agent_rack_positions = [None] * nagents
-        self.orig_rack_positions = [None] * nagents
+        self.current_rack_positions = {}
+        self.orig_rack_positions = {}
         self.states = [(initial_agent_loc[i], 0, None) for i in range(nagents)]
         self.agent_performing_task = [None] * nagents
+        self.agent_task_status = [self.AgentWorkingStatus.NOT_WORKING] * nagents
         # agent locations
 
         # Observations are dictionaries with the agent's and target's locatoin
@@ -93,7 +104,6 @@ class Warehouse(gym.Env):
         for i, agent_pos in enumerate(self.warehouse_api.agent_initial_locs):
             observations[i] = {"a": agent_pos, "c": 0}
             self.agent_rack_positions[i] = None
-            self.orig_rack_positions[i] = None
 
         return observations
 
@@ -114,7 +124,7 @@ class Warehouse(gym.Env):
             if self.agent_performing_task[agent] is not None:
                 self.warehouse_api.set_task_(self.agent_performing_task[agent])
             v = self.warehouse_api.step(self.states[agent], action[agent])
-            print("return from Rust", v, "task: ", self.warehouse_api.task_racks[self.warehouse_api.get_current_task()])
+            #print("return from Rust", v, "task: ", self.warehouse_api.task_racks[self.warehouse_api.get_current_task()])
             # choose one of the v, 
             ind = random.choices(
                 list(range(len(v))), weights=[sprime[1] for sprime in v]
@@ -123,11 +133,28 @@ class Warehouse(gym.Env):
             observations[agent] = {"a": v[ind0][0][0], "c": v[ind0][0][1]}
             self.agent_obs[agent] = observations[agent]
             self.agent_rack_positions[agent] = v[ind0][0][2]
-            if self.orig_rack_positions[agent] is None:
-                self.orig_rack_positions[agent] = self.agent_rack_positions[agent]
-            if self.orig_rack_positions[agent] is not None:
-                if v[ind0][2][-1] == "D" and v[ind0][0][0] == self.orig_rack_positions[agent]:
-                    self.orig_rack_positions[agent] = None
+            
+            if self.agent_rack_positions[agent] is not None:
+                # for the current agent task move the rack, then on successful task completion
+                # delete this rack position
+                self.current_rack_positions[self.agent_performing_task[agent]] = \
+                    self.agent_rack_positions[agent]
+                
+                if action[agent] == 4 and \
+                    observations[agent]["a"] in self.warehouse_api.racks and \
+                        self.agent_task_status[agent] == self.AgentWorkingStatus.WORKING:
+                    self.orig_rack_positions[self.agent_performing_task[agent]] = \
+                        observations[agent]["a"]
+            if action[agent] == 5 and self.agent_rack_positions[agent] is None:
+                #print(f"Agent performing task {self.agent_performing_task[agent]} "
+                #      f"put down rack at {self.orig_rack_positions[self.agent_performing_task[agent]]}")
+                if self.agent_performing_task[agent] in self.current_rack_positions.keys():
+                    if self.current_rack_positions[self.agent_performing_task[agent]] == \
+                        self.orig_rack_positions[self.agent_performing_task[agent]]:
+                        # then delete both of them
+                        self.orig_rack_positions.pop(self.agent_performing_task[agent], None)
+                        self.current_rack_positions.pop(self.agent_performing_task[agent], None)
+
             info[agent]["word"] = v[ind0][2]
             rewards.append(-1)
             dones=[False, False]
@@ -156,6 +183,7 @@ class Warehouse(gym.Env):
         return self.renderer.get_renders()
 
     def _render_frame(self, mode: str):
+
         # This will be the function called by the renderer to collect a single frame
         assert mode is not None
 
@@ -182,17 +210,15 @@ class Warehouse(gym.Env):
         
 
         # if an agent is carrying a rack draw this rack first
-        for ag in range(self.warehouse_api.nagents):
-            if self.agent_rack_positions[ag] is not None:
-                arack = self.agent_rack_positions[ag]
-                pygame.draw.rect(
-                    canvas,
-                    (0, 0 ,255),
-                    pygame.Rect(
-                        pix_square_size * np.array(arack, dtype=np.int64) + 0.1 * pix_square_size,
-                        (pix_square_size - 0.2 * pix_square_size, pix_square_size - 0.2 * pix_square_size)
-                    ),
-                )
+        for k, v in self.current_rack_positions.items():
+            pygame.draw.rect(
+                canvas,
+                (0, 0 ,255),
+                pygame.Rect(
+                    pix_square_size * np.array(v, dtype=np.int64) + 0.1 * pix_square_size,
+                    (pix_square_size - 0.2 * pix_square_size, pix_square_size - 0.2 * pix_square_size)
+                ),
+            )
         for r in self.warehouse_api.racks:
             pygame.draw.rect(
                 canvas,
@@ -202,19 +228,16 @@ class Warehouse(gym.Env):
                     (pix_square_size - 0.2 * pix_square_size, pix_square_size - 0.2 * pix_square_size)
                 ),
             )
-        for ag in range(self.warehouse_api.nagents):
-            if self.orig_rack_positions[ag] is not None:
-                if not all(np.equal(self.agent_rack_positions[ag],self.orig_rack_positions[ag])):
-                    r = self.orig_rack_positions[ag]
-                    pygame.draw.rect(
-                        canvas,
-                        (255, 255 ,255),
-                        pygame.Rect(
-                            pix_square_size * np.array(r, dtype=np.int64) + 0.1 * pix_square_size,
-                            (pix_square_size - 0.2 * pix_square_size, pix_square_size - 0.2 * pix_square_size)
-                        ),
-                    )
-                    
+        
+        for k, v in self.orig_rack_positions.items():
+            pygame.draw.rect(
+                    canvas,
+                    (255, 255 ,255),
+                    pygame.Rect(
+                        pix_square_size * np.array(v, dtype=np.int64) + 0.1 * pix_square_size,
+                        (pix_square_size - 0.2 * pix_square_size, pix_square_size - 0.2 * pix_square_size)
+                    ),
+                )
         
         # draw each of the agents as a circle
         for ag in range(self.warehouse_api.nagents):

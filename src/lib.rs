@@ -569,7 +569,7 @@ where S: Copy + std::fmt::Debug + Hash + Eq + Send + Sync + 'static,
         prods
     ) = scheduler_synthesis(model, &w[..], &eps, &target[..], prods);
     //println!("{:?}", pis);
-    //println!("alloc: \n{:.3?}", alloc);
+    println!("alloc: \n{:.3?}", alloc);
     // convert output schedulers to 
     // we need to construct the randomised scheduler here, then the output from the randomised
     // scheduler, which will already be from a python script, will be the output of this function

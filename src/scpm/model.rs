@@ -312,7 +312,7 @@ impl SCPM {
             for (j, task) in self.tasks.tasks.iter().enumerate() {
                 mdp.set_task(j);
                 output.push(build_model(
-                    (mdp.get_init_state(), 0), 
+                    (mdp.get_init_state(i), 0), 
                     //agent, 
                     //&mdp_rewards,
                     mdp,
