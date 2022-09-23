@@ -12,5 +12,7 @@ classifiers = [
 ]
 dependencies = [
     "pulp>=2.6",
-    "cvxpy==1.2"
+    "cvxpy==1.2",
+    "inquirer==2.10",
+    "redis>=4.3"
 ]
