@@ -221,7 +221,7 @@ where S: Copy + std::fmt::Debug + Eq + Hash, E: Env<S> {
                 product_mdp.insert_avail_act(&(s, q), action as i32);
                 for (sprime, p, w) in v.iter() { 
 
-                    let qprime: i32 = *task.transitions.get(&(q, w.to_string())).unwrap();
+                    let qprime: i32 = task.get_transition(q, w);
                     if !visited.contains(&(*sprime, qprime)) {
                         visited.insert((*sprime, qprime));
                         stack.push_back((*sprime, qprime));

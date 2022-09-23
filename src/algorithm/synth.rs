@@ -1,12 +1,14 @@
+//use array_macro::__core::num;
 use hashbrown::{HashMap, HashSet};
-use rand::seq::SliceRandom;
+//use rand::seq::SliceRandom;
+//use crate::algorithm::dp::value_iteration;
 use crate::scpm::model::{SCPM, MOProductMDP};
-use crate::{Mantissa, blas_dot_product, val_or_zero_one, solver, new_target};
+use crate::{Mantissa, blas_dot_product, solver, new_target};
 //use pyo3::prelude::*;
 use crate::parallel::threaded::process_mdps;
 use std::time::Instant;
 use std::hash::Hash;
-use rand::thread_rng;
+//use rand::thread_rng;
 
 //#[pyfunction]
 //#[pyo3(name="para_test")]
@@ -14,7 +16,8 @@ pub fn process_scpm<S>(
     model: &SCPM, 
     w: &[f64], 
     eps: &f64,
-    prods: Vec<MOProductMDP<S>>
+    prods: Vec<MOProductMDP<S>>,
+    target: &[f64]
 ) -> (Vec<f64>, Vec<MOProductMDP<S>>, HashMap<(i32, i32), Vec<f64>>, Vec<(i32, i32, Vec<f64>)>) 
 where S: Send + Sync + Copy + Hash + Eq + 'static {
     // Algorithm 1 will need to follow this format
@@ -31,23 +34,45 @@ where S: Send + Sync + Copy + Hash + Eq + 'static {
     
     let mut r = vec![0.; num_agents + num_tasks];
     let mut alloc: Vec<(i32, i32, Vec<f64>)> = Vec::new();
-    println!("result: {:?}", result);
+    let mut cost_: Vec<f64> = vec![0.; num_agents + num_tasks];
+    //println!("result: {:?}", result);
     for task in 0..model.tasks.size {
+        // add items from v_tot_cost until the cost is greater than the target then no more
+        // can be added to the agent
         let v_tot_cost = result.get_mut(&(task as i32)).unwrap(); // <- this will be a vector (agent, weighted cost)
         // First try randomly permuting v_tot_cost to see if this solves the problem
-        // of one agent being allocated everything
-        v_tot_cost.shuffle(&mut thread_rng());
         // sort the vector of (agent, tot cost) by cost
         v_tot_cost.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap()); // reflects maximisation
+        //println!("Sorted task alloc vec: {:?}", v_tot_cost);
+        // loop through the v_tot_cost until we find an agent whose cost threshold has not yet 
+        // been reached
+        let mut agent_selected: i32 = v_tot_cost[0].0;
+        for i in 0..v_tot_cost.len() {
+            let v_tot_cost_agent = v_tot_cost[i].0 as usize;
+            let v_tot_task_cost_ = v_tot_cost[i].2[v_tot_cost_agent];
+            //println!("cost compare agent: {}, new cost: {}, target: {}", 
+            //    v_tot_cost_agent, cost_[v_tot_cost_agent] + v_tot_task_cost_, target[v_tot_cost_agent]);
+            if cost_[v_tot_cost_agent] + v_tot_task_cost_ > target[v_tot_cost_agent] {
+                cost_[v_tot_cost_agent] += v_tot_task_cost_;
+                agent_selected = v_tot_cost_agent as i32;
+                break;
+            } else {
+                if i == v_tot_cost.len() - 1 {
+                    cost_[v_tot_cost_agent] += v_tot_task_cost_;
+                    agent_selected = v_tot_cost_agent as i32;
+                }
+            }
+        }
+        //println!("task: {}, cost: {:?}, target: {:?}", task, cost_, target);
         // get the allocation multi-objective vector for the task and add it to r
-        let rij = alloc_map.get(&(v_tot_cost[0].0, task as i32)).unwrap();
-        alloc.push((v_tot_cost[0].0, task as i32, rij.to_vec()));
+        let rij = alloc_map.get(&(agent_selected, task as i32)).unwrap();
+        alloc.push((agent_selected, task as i32, rij.to_vec()));
         // add the agent cost to the allocation rewards
-        r[v_tot_cost[0].0 as usize] += rij[0];
+        r[agent_selected as usize] += rij[0];
         // add the task cost to the allocation rewards
         r[num_agents + task] += rij[1];
         for i in 0..model.num_agents {
-            if i as i32 != v_tot_cost[0].0 {
+            if i as i32 != agent_selected {
                 pis.remove(&(i as i32, task as i32));
             }
         }
@@ -94,7 +119,7 @@ where S: Send + Sync + Copy + Hash + Eq + 'static {
     // compute the initial point for the random weight vector
     println!("Num agents: {}, Num tasks: {}", model.num_agents, model.tasks.size);
     let (r, prods_, pis, alloc) = process_scpm(
-        model, &w[..], &eps, prods 
+        model, &w[..], &eps, prods, &tnew[..],
     );
     for (agent_, task_, r_) in alloc.into_iter() {
         allocation_acc.push((0, agent_, task_, r_));
@@ -173,7 +198,7 @@ where S: Send + Sync + Copy + Hash + Eq + 'static {
                     }
                     false => { 
                         let (r, prods_, pis, alloc) = process_scpm(
-                            model, &w[..], &eps, prods
+                            model, &w[..], &eps, prods, &tnew[..]
                         );
 
                         for (agent_, task_, r_) in alloc.into_iter() {

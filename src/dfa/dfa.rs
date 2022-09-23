@@ -18,7 +18,7 @@ pub struct DFA {
     pub rejecting: Vec<i32>,
     #[pyo3(get)]
     pub done: Vec<i32>,
-    pub transitions: HashMap<(i32, String), i32>,
+    pub transitions: HashMap<String, i32>,
     pub current_state: i32,
     words: HashSet<String>
 }
@@ -53,7 +53,7 @@ impl DFA {
     }
 
     fn add_transition(&mut self, q: i32, w: String, qprime: i32) {
-        self.transitions.insert((q, w), qprime);
+        self.transitions.insert(format!("{}-{}", q, w), qprime);
     }
 
     fn define_words(&mut self, words: HashSet<String>) {
@@ -62,8 +62,14 @@ impl DFA {
         }
     }
 
+    pub fn get_transition(&self, state: i32, word: &str) -> i32 {
+        let qprime = *self.transitions.get(&format!("{}-{}", state, word))
+            .expect(&format!("Count no find transition: {}-{}", state, word));
+        qprime
+    }
+
     pub fn next(&mut self, state: i32, word: String) -> i32 {
-        let qprime = *self.transitions.get(&(state, word.to_string())).unwrap();
+        let qprime = *self.transitions.get(&format!("{}-{}", state, word)).unwrap();
         //println!("state: {}, word: {:?} -> q' {}", state, word, qprime);
         self.current_state = qprime;
         self.current_state
@@ -171,5 +177,10 @@ impl Mission {
 
     pub fn release_last_dfa(&mut self) -> Option<DFA> {
         self.tasks.pop()
+    }
+
+    pub fn clear_mission(&mut self) {
+        self.tasks = Vec::new();
+        self.size = 0;
     }
 }

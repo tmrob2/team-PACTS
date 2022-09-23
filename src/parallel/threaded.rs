@@ -22,14 +22,14 @@ pub fn process_mdps<S>(
         Vec<MOProductMDP<S>>, 
         HashMap<(i32, i32), Vec<f64>>,
         HashMap<(i32, i32), Vec<f64>>,
-        HashMap<i32, Vec<(i32,f64)>>,
+        HashMap<i32, Vec<(i32,f64, Vec<f64>)>>,
     ), 
     Box<dyn std::error::Error>>
 where S: Send + Sync + Copy + Hash + Eq + 'static {
 
     //let t1 = Instant::now();
     let mut mdp_return_vec: Vec<MOProductMDP<S>> = Vec::new();
-    let mut result: HashMap<i32, Vec<(i32,f64)>> = HashMap::new();
+    let mut result: HashMap<i32, Vec<(i32,f64, Vec<f64>)>> = HashMap::new();
     let mut alloc_map: HashMap<(i32, i32), Vec<f64>> = HashMap::new();
     let mut pis: HashMap<(i32, i32), Vec<f64>> = HashMap::new();
     let pool = ThreadPool::new(NUM_THREADS);
@@ -55,22 +55,22 @@ where S: Send + Sync + Copy + Hash + Eq + 'static {
         mo_exp_cost[mdp.agent_id as usize] = r[0];
         mo_exp_cost[num_agents + mdp.task_id as usize] = r[1];
         let exp_w_tot_cost = blas_dot_product(&mo_exp_cost[..], w);
-        println!("agent: {}, task: {}, multiplied: {:?} x {:?} = {:.3}", 
-            mdp.agent_id, mdp.task_id, mo_exp_cost, w, exp_w_tot_cost);
+        //println!("agent: {}, task: {}, multiplied: {:?} x {:?} = {:.3}", 
+        //    mdp.agent_id, mdp.task_id, mo_exp_cost, w, exp_w_tot_cost);
         // then multiply by w to get to 
         match result.get_mut(&mdp.task_id) {
             Some(v) => {
-                v.push((mdp.agent_id, exp_w_tot_cost));
+                v.push((mdp.agent_id, exp_w_tot_cost, mo_exp_cost));
             }
             None => {
-                result.insert(mdp.task_id, vec![(mdp.agent_id, exp_w_tot_cost)]);
+                result.insert(mdp.task_id, vec![(mdp.agent_id, exp_w_tot_cost, mo_exp_cost)]);
             }
         }
         pis.insert((mdp.agent_id, mdp.task_id), pi);
         mdp_return_vec.push(mdp);
     }
 
-    println!("allocation hashmap: \n{:?}", alloc_map);
+    //println!("allocation hashmap: \n{:?}", alloc_map);
     
     //println!("time: {:?}, Result: {:.2?} \n {:?}", t1.elapsed().as_secs_f64(), result, pis);
     Ok((mdp_return_vec, pis, alloc_map, result))
@@ -85,7 +85,8 @@ fn compute_value<S>(
     ntasks: usize
 ) -> (MOProductMDP<S>, Vec<f64>, Vec<f64>)
 where S: Copy + Hash + Eq {
+    println!("Starting value iteration");
     let (pi, r) = value_iteration(&mdp, &w[..], &eps, nagents, ntasks);
-    //println!("mdp({},{}) -> {:.3?}", mdp.agent_id, mdp.task_id, r);
+    println!("mdp({},{}) -> {:.3?}", mdp.agent_id, mdp.task_id, r);
     (mdp, pi, r)
 }

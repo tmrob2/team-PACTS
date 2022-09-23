@@ -14,14 +14,14 @@ pub mod executor;
 use std::hash::Hash;
 use std::mem;
 use agent::agent::Env;
-use executor::executor::{GenericSolutionFunctions, DefineSolution, Solution, DefineExecutor, Execution};
+use executor::executor::{GenericSolutionFunctions, DefineSolution, Solution, Execution, DefineSerialisableExecutor};
 use pyo3::prelude::*;
 //use pyo3::exceptions::PyValueError;
 use hashbrown::HashMap;
 use scpm::model::SCPM; // , MOProductMDP};
-use algorithm::synth::{scheduler_synthesis};
+use algorithm::synth::scheduler_synthesis;
 //test_scpm, warehouse_scheduler_synthesis
-use envs::warehouse::{Warehouse, test_prod, warehouse_scheduler_synthesis, Executor};
+use envs::warehouse::{Warehouse, test_prod, warehouse_scheduler_synthesis, Executor, SerialisableExecutor};
 //use agent::agent::{MDP};
 use dfa::dfa::{DFA, Mission, json_deserialize_from_string};
 //use parallel::{threaded::process_mdps};
@@ -427,121 +427,6 @@ fn new_target(
 }
 
 //--------------------------------------
-// Python Outputs Trait
-//--------------------------------------
-// TODO need to implement this generic struct so that users can just apply it 
-// to generic structs
-
-//pub struct Outputs<S> {
-//    pub prod_state_map: HashMap<(i32, i32), HashMap<(S, i32), usize>>,
-//    pub schedulers: HashMap<usize, HashMap<(i32, i32), Vec<f64>>>,
-//    pub weights: Vec<f64>,
-//    pub ntasks: usize, 
-//    pub npoints: usize,
-//    pub agent_task_allocations: HashMap<i32, Vec<i32>>
-//}
-//
-//impl<S> Outputs<S> {
-//    fn get_index_(&self, state: S, q: i32, agent: i32, task: i32) -> usize {
-//        let map = 
-//            &self.prod_state_map.get(&(agent, task)).unwrap();
-//        *map.get(&(state, q)).unwrap()
-//    }
-//
-//    fn get_action_(&self, state: usize, agent: i32, task: i32, point: usize) -> i32 {
-//        let point_ = self.schedulers.get(&point).unwrap();
-//        point_.get(&(agent, task)).unwrap()[state] as i32
-//    }
-//
-//    fn get_allocation_(&self, point: usize, task: i32) -> Vec<i32> {
-//        let point_keys = 
-//            self.schedulers.get(&point).unwrap();
-//        let mut keys_: Vec<_> = Vec::new();
-//        for (i, _j) in point_keys
-//            .keys().filter(|(_a, t)| *t == task) {
-//            keys_.push(*i);
-//        }
-//        keys_
-//    }
-//
-//    fn new_(ntasks: usize) -> Self {
-//        Outputs { 
-//            prod_state_map: HashMap::new(),
-//            schedulers: HashMap::new(),
-//            weights: Vec::new(),
-//            ntasks,
-//            npoints: 0,
-//            agent_task_allocations: HashMap::new()
-//        }
-//    }
-//
-//    fn set_state_map_(
-//        &mut self, 
-//        state_map: HashMap<(S, i32), usize>, 
-//        agent: i32, 
-//        task: i32
-//    ) {
-//        self.prod_state_map.insert((agent, task), state_map);
-//    }
-//
-//    fn set_policies_(
-//        &mut self, 
-//        scheds: HashMap<usize, HashMap<(i32, i32), Vec<f64>>>) {
-//        self.schedulers = scheds;
-//    }
-//
-//    fn set_weights_(&mut self, weights: Vec<f64>, npoints: usize) {
-//        self.weights = weights;
-//        self.npoints = npoints;
-//    }
-//
-//    fn set_agent_task_queues(&mut self) {
-//        // with the weights (row major format) sample a scheduler
-//        // then determine which agent the task is allocated to
-//        // then add the task to the agents queue
-//        // we probably don't need to return anything and just store the 
-//        // task_queue in the outputs
-//
-//        for task in 0..self.ntasks {
-//            // get the slice of the weights vector which is applicable
-//            // to this task choice
-//            let w_ = &self.weights[task * self.npoints..(task + 1) * self.npoints];
-//            // sample and argmax from this weight 
-//            // so we need an array of indexes
-//            let choices : Vec<usize> = (0..self.npoints).collect();
-//            let mut rng = thread_rng();
-//            let dist = WeightedIndex::new(w_).unwrap();
-//            // Scheduler: k
-//            let k = choices[dist.sample(&mut rng)];
-//
-//            // For the scheduler chosen, return the allocated agent
-//            let agent = self.get_allocation(k, task as i32)[0];
-//            match self.agent_task_allocations.get_mut(&agent) {
-//                Some(t) => { 
-//                    // The agent index already exists, so we add to current tasks
-//                    t.push(task as i32);
-//                }
-//                None => {
-//                    self.agent_task_allocations
-//                        .insert(agent, vec![task as i32]);
-//                }
-//            }
-//        }
-//    }
-//
-//    fn get_next_task_(&mut self, agent: i32) -> Option<i32> {
-//        match self.agent_task_allocations.get_mut(&agent) {
-//            Some(t) => {
-//                t.pop()
-//            }
-//            None => { 
-//                None
-//            }
-//        }
-//    }
-//}
-
-//--------------------------------------
 // Some testing functions for python testing of Rust API
 //--------------------------------------
 
@@ -551,12 +436,12 @@ fn generic_scheduler_synthesis<E, S>(
     w: Vec<f64>, 
     eps: f64, 
     target: Vec<f64>,
-    executor: &mut Executor
+    executor: &mut SerialisableExecutor
 ) -> Result<Vec<f64>, String>
 where S: Copy + std::fmt::Debug + Hash + Eq + Send + Sync + 'static, 
     E: Env<S>, Solution<S>: DefineSolution<S> + GenericSolutionFunctions<S>,
-    Executor: DefineExecutor<S> + Execution<S> {
-    // TODO: The return from this might not be enough
+    SerialisableExecutor: DefineSerialisableExecutor<S> + Execution<S> {
+    println!("Constructing products");
     let mut solution: Solution<S> = Solution::new_(model.tasks.size);
     let prods = model.construct_products(env);
 
@@ -568,7 +453,6 @@ where S: Copy + std::fmt::Debug + Hash + Eq + Send + Sync + 'static,
         l,
         prods
     ) = scheduler_synthesis(model, &w[..], &eps, &target[..], prods);
-    //println!("{:?}", pis);
     println!("alloc: \n{:.3?}", alloc);
     // convert output schedulers to 
     // we need to construct the randomised scheduler here, then the output from the randomised
@@ -617,6 +501,7 @@ fn ce(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<SCPM>()?;
     m.add_class::<Warehouse>()?;
     m.add_class::<Executor>()?;
+    m.add_class::<SerialisableExecutor>()?;
     //m.add_function(wrap_pyfunction!(build_model, m)?)?;
     //m.add_function(wrap_pyfunction!(value_iteration_test, m)?)?;
     m.add_function(wrap_pyfunction!(test_prod, m)?)?;

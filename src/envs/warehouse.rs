@@ -1,20 +1,24 @@
 use pyo3::prelude::*;
 use hashbrown::{HashMap, HashSet};
+use serde::{Serialize, Deserialize};
 use crate::agent::agent::Env;
 use crate::dfa::dfa::DFA;
 use crate::scpm::model::{SCPM, build_model};
 //use crate::algorithm::synth::{process_scpm, scheduler_synthesis};
 use crate::algorithm::dp::value_iteration;
-use crate::{generic_scheduler_synthesis};
+use crate::generic_scheduler_synthesis;
 //use crate::{random_sched};
-//use pyo3::prelude::*;
 use pyo3::exceptions::PyValueError;
+use std::hash::Hash;
+//use std::env::set_current_dir;
+//use std::hash::Hash;
 use std::time::Instant;
 //use rand::seq::SliceRandom;
-use rand::prelude::*;
-use rand_chacha::ChaCha8Rng;
+//use rand::prelude::*;
+//use rand_chacha::ChaCha8Rng;
 use array_macro::array;
-use crate::executor::executor::{DefineExecutor, Execution};
+use crate::executor::executor::{Execution, DefineSerialisableExecutor};
+use std::collections::HashMap as DefaultHashMap;
 
 //-------
 // Types 
@@ -26,62 +30,191 @@ type State = (Point, u8, Option<Point>);
 // Helpers
 //--------
 
+// TODO Make the Executor String based and generic so that it does not need to 
+// be specified in the env file
 #[pyclass]
 pub struct Executor {
-    state_maps: HashMap<(i32, i32), HashMap<(State, i32), usize>>,
-    schedulers: HashMap<(i32, i32), Vec<f64>>,
-    agent_task_allocations: HashMap<i32, Vec<i32>>,
-    tasks: HashMap<i32, DFA>
+    state_maps: DefaultHashMap<(i32, i32), DefaultHashMap<(State, i32), usize>>,
+    schedulers: DefaultHashMap<(i32, i32), Vec<f64>>,
+    #[pyo3(get)]
+    agent_task_allocations: DefaultHashMap<i32, Vec<i32>>,
+    tasks: DefaultHashMap<i32, DFA>,
+    task_map: DefaultHashMap<i32, i32>,
 }
 
-impl DefineExecutor<State> for Executor {
+#[pymethods]
+impl Executor {
+    #[new]
+    fn new(nagents: usize) -> Executor {
+        let mut init_agent_alloc: DefaultHashMap<i32, Vec<i32>> = DefaultHashMap::new();
+        for agent in 0..nagents {
+            init_agent_alloc.insert(agent as i32, Vec::new());
+        }
+
+        Executor { 
+            state_maps: DefaultHashMap::new(), 
+            schedulers: DefaultHashMap::new(), 
+            agent_task_allocations: init_agent_alloc, 
+            tasks: DefaultHashMap::new(), 
+            task_map: DefaultHashMap::new(), 
+        }
+    }
+
+    fn get_next_task(&mut self, agent: i32) -> Option<i32> {
+        match self.agent_task_allocations.get_mut(&agent) {
+            Some(tasks_remaining) => { 
+                tasks_remaining.pop()
+            }
+            None => {
+                None
+            }
+        }
+    }
+
+    fn get_task_mapping(&self, task: i32) -> i32 {
+        *self.task_map.get(&task).unwrap()
+    }
+
+    fn check_done(&self, task: i32) -> u8 {
+        self.tasks.get(&task).unwrap().check_done()
+    }
+
+    fn dfa_current_state(&self, task: i32) -> i32 {
+        self.tasks.get(&task).unwrap().current_state
+    }
+
+    fn get_action(&self, agent: i32, task: i32, state: State, q: i32) -> i32 {
+        //println!("state: {:?}, q: {}", state, q);
+        let sidx = *self.state_maps.get(&(agent, task)).unwrap()
+            .get(&(state, q))
+            .expect(&format!("failed at {:?}", (state, q)));
+        let action = self.schedulers.get(&(agent, task)).unwrap()[sidx] as i32;
+        action
+    }
+
+    fn dfa_next_state(&mut self, task: i32, q: i32, word: String) -> i32 {
+        self.tasks.get_mut(&task).unwrap().next(q, word)
+    }
+
+    fn merge_exec(&mut self, other: &mut Executor, num_agents: usize, batch_size: usize) {
+        for agent in 0..num_agents {
+            for task in 0..batch_size {
+                self.state_maps.insert(
+                    (agent as i32, *other.task_map.get(&(task as i32)).unwrap()), 
+                    other.state_maps.get_mut(&(agent as i32, task as i32)).unwrap().to_owned()
+                );
+                match other.schedulers.get_mut(&(agent as i32, task as i32)) {
+                    Some(sch) => { 
+                        self.schedulers.insert(
+                            (agent as i32, *other.task_map.get(&(task as i32)).unwrap()),
+                            sch.to_owned() 
+                        );
+                    }
+                    None => {  }
+                }
+                
+                self.tasks.insert(
+                    *other.task_map.get(&(task as i32)).unwrap(),
+                    other.tasks.get(&(task as i32)).unwrap().to_owned()
+                );
+            }
+            match self.agent_task_allocations.get_mut(&(agent as i32)) {
+                Some(tvec) => { 
+                    let new_alloc = other.agent_task_allocations.get(&(agent as i32)).unwrap();
+                    for t in new_alloc.iter() {
+                        tvec.push(*other.task_map.get(&(*t as i32)).unwrap()) 
+                    }
+                }
+                None => { 
+                    let  mut tvnew = Vec::new();
+                    let new_alloc = other.agent_task_allocations.get(&(agent as i32)).unwrap();
+                    for t in new_alloc.iter() {
+                        tvnew.push(*other.task_map.get(&(*t as i32)).unwrap()) 
+                    }
+                    self.agent_task_allocations.insert(
+                        agent as i32, 
+                        tvnew
+                    );
+                }
+            }
+        }
+        self.clean_up(other);
+    }
+
+    fn clean_up(&self, other: &mut Executor) {
+        drop(other);
+    }
+
+    fn print_current_task_alloc(&self, num_agents: usize) {
+        for agent in 0..num_agents {
+            if !self.agent_task_allocations.get(&(agent as i32)).unwrap().is_empty() {
+                println!("Agent: {} -> {:?}", 
+                    agent, self.agent_task_allocations.get(&(agent as i32)));
+            }
+        }
+    }
+}
+
+#[pyclass]
+#[derive(Serialize, Deserialize)]
+pub struct SerialisableExecutor {
+    state_maps: Vec<((i32, i32), Vec<((State, i32), usize)>)>,
+    schedulers: Vec<((i32, i32), Vec<f64>)>,
+    agent_task_allocations: DefaultHashMap<i32, Vec<i32>>,
+    task: DefaultHashMap<i32, DFA>,
+    task_map: DefaultHashMap<i32, i32>,
+}
+
+impl DefineSerialisableExecutor<State> for SerialisableExecutor {
     fn new_(nagents: usize) -> Self {
 
         let mut agent_task_alloc: HashMap<i32, Vec<i32>> = HashMap::new();
         for agent in 0..nagents {
             agent_task_alloc.insert(agent as i32, Vec::new());
         }
-        Executor { 
-            state_maps: HashMap::new(), 
-            schedulers: HashMap::new(), 
-            agent_task_allocations: agent_task_alloc,
-            tasks: HashMap::new()
+        SerialisableExecutor { 
+            state_maps: Vec::new(), 
+            schedulers: Vec::new(), 
+            agent_task_allocations: DefaultHashMap::new(),
+            task: DefaultHashMap::new(), 
+            task_map: DefaultHashMap::new(),
         }
     }
 
-    fn get_state_map(&self, agent: i32, task: i32) 
-        -> &HashMap<(State, i32), usize> {
-        self.state_maps.get(&(agent, task)).unwrap()
+    fn set_state_map(&mut self, agent: i32, task: i32, map: Vec<((State, i32), usize)>) {
+        self.state_maps.push(((agent, task), map));
     }
 
-    fn set_state_map(&mut self, agent: i32, task: i32, map: HashMap<(State, i32), usize>) {
-        self.state_maps.insert((agent, task), map);
+    fn convert_to_hashmap(&mut self, nagents: usize, ntasks: usize) -> 
+        DefaultHashMap<(i32, i32), DefaultHashMap<(State, i32), usize>> {
+        let mut statemap: DefaultHashMap<(i32, i32), DefaultHashMap<(State, i32), usize>> = DefaultHashMap::new();
+        // start by constructing the keys of the hashmap
+        for i in 0..nagents {
+            for j in 0..ntasks {
+                statemap.insert((i as i32, j as i32), DefaultHashMap::new());
+            }
+        }
+
+        for ((i, j), v) in self.state_maps.drain(..) {
+            match statemap.get_mut(&(i, j)) {
+                Some(smap) => {
+                    for (k, val) in v.into_iter() {
+                        smap.insert(k, val);
+                    }
+                 }
+                _ => { }
+            }
+        }
+
+        statemap
     }
 
-    fn remove_state_map(&mut self, agent: i32, task: i32) {
-        self.state_maps.remove(&(agent, task));
-    }
-
-    fn get_scheduler(&self, agent: i32, task: i32) -> &[f64] {
-        self.schedulers.get(&(agent, task)).unwrap()
+    fn insert_dfa(&mut self, dfa: DFA, task: i32) {
+        self.task.insert(task, dfa);
     }
 
     fn set_scheduler(&mut self, agent: i32, task: i32, scheduler: Vec<f64>) {
-        self.schedulers.insert((agent, task), scheduler);
-    }
-
-    fn remove_scheduler(&mut self, agent: i32, task: i32) {
-        self.schedulers.remove(&(agent, task));
-    }
-
-    fn get_agent_task_allocations(&self, agent: i32) -> &[i32] {
-        &self.agent_task_allocations.get(&agent).unwrap()[..]
-    }
-
-    fn get_next_task(&mut self, agent: i32) -> Option<i32> {
-        let tasks_remaining = 
-            self.agent_task_allocations.get_mut(&agent).unwrap();
-        tasks_remaining.pop()
+        self.schedulers.push(((agent, task), scheduler));
     }
 
     fn set_agent_task_allocation(&mut self, agent: i32, task: i32) {
@@ -94,59 +227,50 @@ impl DefineExecutor<State> for Executor {
             }
         }
     }
-
-    fn dfa_next_state_(&mut self, task: i32, q: i32, word: String) -> i32 {
-        self.tasks.get_mut(&task).unwrap().next(q, word)
-    }
-
-    fn check_done_(&self, task: i32) -> u8 {
-        self.tasks.get(&task).unwrap().check_done()
-    }
-
-    fn insert_dfa(&mut self,dfa: DFA, task: i32) {
-        self.tasks.insert(task, dfa);
-    }
-
-    fn dfa_current_state_(&self, task: i32) -> i32 {
-        self.tasks.get(&task).unwrap().current_state
-    }
-
-
 }
 
 #[pymethods]
-impl Executor {
+impl SerialisableExecutor {
     #[new]
-    fn new(nagents: usize) -> Self {
-        Executor::new_(nagents)
+    fn new(nagents: Option<usize>, input_json: Option<String>) -> Self {
+        match input_json {
+            Some(s) => {
+                serde_json::from_str(&s).unwrap()
+            }
+            None => { 
+                SerialisableExecutor::new_(nagents.unwrap())
+            }
+        }
     }
 
-    fn get_next_task(&mut self, agent: i32) -> Option<i32> {
-        self.get_next_task_(agent)
+    fn to_json(&self) -> String {
+        serde_json::to_string(&self).unwrap()
     }
 
-    fn remove_completed_task_agent(&mut self, agent: i32, task: i32) {
-        self.remove_completed_task_agent_(agent, task);
+    fn insert_task_map(&mut self, task_map: DefaultHashMap<i32, i32>) {
+        self.task_map = task_map; //Vec::from_iter(task_map.into_iter());
     }
 
-    fn get_action(&self, agent: i32, task: i32, state: State, q: i32) -> i32 { 
-        self.get_action_(agent, task, state, q)
-    }
-
-    fn dfa_next_state(&mut self, task: i32, q: i32, word: String) -> i32 {
-        self.dfa_next_state_(task, q, word)
-    }
-
-    fn dfa_current_state(&self, task: i32) -> i32 {
-        self.dfa_current_state_(task)
-    }
-
-    fn dfa_check_done(&self, task: i32) -> u8 {
-        self.check_done_(task)
+    fn convert_to_executor(&mut self, nagents: usize, ntasks: usize) -> Executor {
+        let smap = 
+            self.convert_to_hashmap(nagents, ntasks);
+         
+        Executor {
+            state_maps: smap,
+            schedulers: self.schedulers.drain(..).collect(), // Vector to hashmap creation
+            agent_task_allocations: self.agent_task_allocations.drain().collect(),
+            tasks: self.task.drain().collect(),
+            task_map: self.task_map.drain().collect(),
+        }
     }
 }
 
-impl Execution<State> for Executor { }
+#[pyclass]
+pub struct ExecutorString {
+    s: String
+}
+
+impl Execution<State> for SerialisableExecutor { }
 
 //-----------------
 // Python Interface
@@ -165,11 +289,13 @@ pub struct Warehouse {
     pub agent_initial_locs: Vec<Point>,
     pub action_to_dir: HashMap<u8, [i8; 2]>,
     #[pyo3(get)]
-    pub task_racks: Vec<Point>,
+    pub task_racks_start: HashMap<i32, Point>,
     #[pyo3(get)]
-    pub task_feeds: Vec<Point>,
+    pub task_racks_end: HashMap<i32, Point>,
     #[pyo3(get)]
-    pub words: [String; 20],
+    pub task_feeds: HashMap<i32, Point>,
+    #[pyo3(get)]
+    pub words: [String; 25],
     pub seed: u64
 }
 
@@ -189,9 +315,9 @@ impl Warehouse {
         for (i, act) in actions_to_dir.into_iter().enumerate() {
             action_map.insert(i as u8, act);
         }
-        let w0: [String; 4] = ["R".to_string(), "F".to_string(), "FR".to_string(), "NFR".to_string()];
+        let w0: [String; 5] = ["RS".to_string(), "RE".to_string(), "F".to_string(), "FR".to_string(), "NFR".to_string()];
         let w1: [String; 5] = ["P".to_string(), "D".to_string(), "CR".to_string(), "CNR".to_string(), "NC".to_string()];
-        let mut words: [String; 20] = array!["".to_string(); 20];
+        let mut words: [String; 25] = array!["".to_string(); 25];
         let mut count: usize = 0;
         for wa in w0.iter() {
             for wb in w1.iter() {
@@ -208,8 +334,9 @@ impl Warehouse {
             racks: HashSet::new(),
             agent_initial_locs: initial_locations,
             action_to_dir: action_map,
-            task_racks: Vec::new(),
-            task_feeds: Vec::new(),
+            task_racks_start: HashMap::new(),
+            task_racks_end: HashMap::new(),
+            task_feeds: HashMap::new(),
             words,
             seed
         };
@@ -225,22 +352,35 @@ impl Warehouse {
         self.racks.clone()
     }
 
-    /// Get a random group of racks from the set of all racks
-    fn set_random_task_rack(&mut self, ntasks: usize) {
-        let mut rnd = ChaCha8Rng::seed_from_u64(self.seed);
-        let racksv: Vec<&Point> = self.racks.iter().collect();
-        println!("Racks: {:?}", self.racks);
-        self.task_racks = racksv.choose_multiple(&mut rnd, ntasks).map(|x| **x).collect();
-        println!("SET: => task racks: {:?}", self.task_racks);
+    fn add_task_rack_start(&mut self, task: i32, rack: Point) {
+        self.task_racks_start.insert(task, rack);
     }
 
-    fn set_random_task_feeds(&mut self, ntasks: usize) {
-        let mut rnd = ChaCha8Rng::seed_from_u64(self.seed);
-        for _ in 0..ntasks {
-            let new_feed_ = *self.feedpoints.choose(&mut rnd).unwrap();
-            self.task_feeds.push(new_feed_);
-        };
-        println!("tasks: {}, task feeds: {:?}", ntasks, self.task_feeds);
+    fn remove_task_rack_start(&mut self, task: i32) {
+        self.task_racks_start.remove(&task);
+    }
+
+    fn add_task_rack_end(&mut self, task: i32, rack: Point) {
+        self.task_racks_end.insert(task, rack);
+    }
+
+    fn remove_task_rack_end(&mut self, task: i32) {
+        self.task_racks_start.remove(&task);
+    }
+
+    
+    fn add_task_feed(&mut self, task: i32, feed: Point) {
+        self.task_feeds.insert(task, feed);
+    }
+    
+    fn remove_task_feed(&mut self, task: i32) {
+        self.task_feeds.remove(&task);
+    }
+
+    fn clear_env(&mut self) {
+        self.task_racks_start = HashMap::new();
+        self.task_racks_end = HashMap::new();
+        self.task_feeds = HashMap::new();
     }
 
     fn step(&self, state: State, action: u8) -> PyResult<Vec<(State, f64, String)>> {
@@ -261,6 +401,14 @@ impl Warehouse {
 
     fn get_current_task(&self) -> usize {
         self.current_task.unwrap()
+    }
+
+    fn mutate_task_racks_start(&mut self, new_hash: HashMap<i32, Point>) {
+        self.task_racks_start.extend(&new_hash);
+    }
+
+    fn mutate_task_feeds(&mut self, new_hash: HashMap<i32, Point>) {
+        self.task_feeds.extend(&new_hash);
     }
 }
 
@@ -327,7 +475,10 @@ impl Warehouse {
             let current_task = self.get_current_task();
             if self.racks.contains(&new_state.0) {
                 // this is a problem...but only if the rack is not the task rack
-                if self.task_racks[current_task] == new_state.0 {
+                if *self.task_racks_start.get(&(current_task as i32)).unwrap() == new_state.0 {
+                    word[1] = "CNR";
+                } else if self.task_racks_end.get(&(current_task as i32)).is_some() && 
+                    *self.task_racks_end.get(&(current_task as i32)).unwrap() == new_state.0 {
                     // this is fine
                     word[1] = "CNR";
                 } else {
@@ -341,14 +492,19 @@ impl Warehouse {
         }
 
     
-        if new_state.0 == self.task_racks[self.current_task.unwrap()] {
+        if new_state.0 == *self.task_racks_start.get(&(self.current_task.unwrap() as i32)).unwrap() {
             // then the rack is in position
-            word[0] = "R";
-        } else if new_state.0 == self.task_feeds[self.current_task.unwrap()] {
+            word[0] = "RS";
+        } else if self.task_racks_end.get(&(self.current_task.unwrap() as i32)).is_some() && 
+            new_state.0 == *self.task_racks_end.get(&(self.current_task.unwrap() as i32)).unwrap()
+        {
+            word[0] = "RE";
+        } else if new_state.0 == *self.task_feeds.get(&(self.current_task.unwrap() as i32))
+            .expect(&format!("Could not find task: {}", self.current_task.unwrap())) {
             word[0] = "F";
         } else if current_state.2.is_some() && 
             current_state.2.unwrap() == new_state.0 && current_state.1 == 0 {
-            word[0] = "R";
+            word[0] = "RS";
         } else {
             word[0] = "NFR";
         }
@@ -358,7 +514,7 @@ impl Warehouse {
 
 impl Env<State> for Warehouse {
     fn step_(&self, state: State, action: u8) -> Result<Vec<(State, f64, String)>, String> {
-        let psuccess :f64 = 0.999;
+        let psuccess :f64 = 0.99;
         let mut v: Vec<(State, f64, String)> = Vec::new();
         if vec![0, 1, 2, 3].contains(&action) {
             let direction: &[i8; 2] = self.action_to_dir.get(&action).unwrap();
@@ -528,10 +684,12 @@ pub fn warehouse_scheduler_synthesis(
     w: Vec<f64>,
     target: Vec<f64>,
     eps: f64,
-    executor: &mut Executor
+    executor: &mut SerialisableExecutor
 ) -> PyResult<Vec<f64>> {
+    
     // To construct a warehouse scheduler synthesis which is a wrapper around
     // the generic scheduler synthesis
+    println!("???");
     let result = 
         generic_scheduler_synthesis(model, env, w, eps, target, executor);
     

@@ -2,6 +2,7 @@ use hashbrown::HashMap;
 use rand::prelude::*;
 use rand::distributions::WeightedIndex;
 use crate::dfa::dfa::DFA;
+use std::collections::HashMap as DefaultHashMap;
 
 //----------------------------------------------------------------------------
 // MOTAP Solution
@@ -197,50 +198,26 @@ where S: Copy + std::hash::Hash + Eq {
 // MOTAP Solution
 //----------------------------------------------------------------------------
 
-pub trait DefineExecutor<S> {
+pub trait DefineSerialisableExecutor<S> {
     /// Function to define a new Executor
     fn new_(nagents: usize) -> Self;
-    
-    /// For a particular task-agent pari get the sampled state-map for the product
-    /// MDP
-    fn get_state_map(&self, agent: i32, task: i32) -> &HashMap<(S, i32), usize>;
 
     /// From the MOTAP solution insert the sampled state-map into the executor
     /// memory
-    fn set_state_map(&mut self, agent: i32, task: i32, map: HashMap<(S, i32), usize>);
+    fn set_state_map(&mut self, agent: i32, task: i32, map: Vec<((S, i32), usize)>);
 
-    fn remove_state_map(&mut self, agent: i32, task: i32);
-
-    /// Get the sampled scheduler for a particular task agent pair
-    /// 
-    /// This function will be paired with the allocation sampler
-    fn get_scheduler(&self, agent: i32, task: i32) -> &[f64];
-    
-    /// Take the scheduler from the MOTAP solutions and insert it into the 
-    /// executor struct
-    fn set_scheduler(&mut self, agent: i32, task: i32, scheduler: Vec<f64>);
-
-    fn remove_scheduler(&mut self, agent: i32, task: i32);
-
-    /// Notice here that the task allocation does not keed the scheduler number
-    /// because we have already sampled the scheduler distribution. 
-    fn get_agent_task_allocations(&self, agent: i32) -> &[i32];
-
-    fn get_next_task(&mut self, agent: i32) -> Option<i32>;
-
-    /// Set the sampled task-agent allocation
-    fn set_agent_task_allocation(&mut self, agent: i32, task: i32);
-
-    fn dfa_next_state_(&mut self, task: i32, q: i32, word: String) -> i32;
+    fn convert_to_hashmap(&mut self, nagents: usize, ntasks: usize) 
+        -> DefaultHashMap<(i32, i32), DefaultHashMap<(S, i32), usize>>;
 
     fn insert_dfa(&mut self, dfa: DFA, task: i32);
 
-    fn check_done_(&self, task: i32) -> u8;
+    fn set_scheduler(&mut self, agent: i32, task: i32, scheduler: Vec<f64>);
 
-    fn dfa_current_state_(&self, task: i32) -> i32;
+    fn set_agent_task_allocation(&mut self, agent: i32, task: i32);
 }
 
-pub trait Execution<S>: DefineExecutor<S> 
+/// These are MOTAP solution methods which need to be serialised to send over redis
+pub trait Execution<S>: DefineSerialisableExecutor<S> 
 where S: Copy + Eq + std::hash::Hash + std::fmt::Debug {
     fn add_alloc_to_execution(&mut self, solution: &mut Solution<S>, nagents: usize) {
         for agent in 0..nagents {
@@ -251,8 +228,11 @@ where S: Copy + Eq + std::hash::Hash + std::fmt::Debug {
                     for (task, k) in v.into_iter() {
                         // For the executor:
                         // 1. Setting the Prod State Map
+                        let prod_state_map_ = 
+                            solution.return_prod_state_map(agent as i32, task);
+                        
                         let prod_state_map = 
-                        solution.return_prod_state_map(agent as i32, task);
+                            Vec::from_iter(prod_state_map_.into_iter());
                         self.set_state_map(agent as i32, task, prod_state_map);
                         // 2. Setting the Scheduler from the solution
                         let scheduler = 
@@ -267,25 +247,5 @@ where S: Copy + Eq + std::hash::Hash + std::fmt::Debug {
                 }
             }
         }
-    }
-
-    /// Function to get the next task from the task queue for the particular 
-    /// agent
-    fn get_next_task_(&mut self, agent: i32) -> Option<i32> {
-        let task = self.get_next_task(agent);
-        task
-    }
-
-    /// Clean up after task-agent execution, to save memory
-    fn remove_completed_task_agent_(&mut self, agent: i32, task: i32) {
-        self.remove_state_map(agent, task);
-        self.remove_scheduler(agent, task);
-    }
-
-    fn get_action_(&self, agent: i32, task: i32, state: S, q: i32) -> i32 {
-        //println!("state: {:?}, q: {}", state, q);
-        let sidx = *self.get_state_map(agent, task).get(&(state, q)).expect(&format!("failed at {:?}", (state, q)));
-        let action = self.get_scheduler(agent, task)[sidx] as i32;
-        action
     }
 }

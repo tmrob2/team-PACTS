@@ -8,7 +8,7 @@ import ce
 import random
 
 class Warehouse(gym.Env):
-    metadata = {"render_modes": ["human", "rgb_array", "single_rgb_array"], "render_fps": 10}
+    metadata = {"render_modes": ["human", "rgb_array", "single_rgb_array"], "render_fps": 4}
 
     class TaskStatus: 
         INPROGESS = 0
@@ -123,53 +123,56 @@ class Warehouse(gym.Env):
             #print("state: ", self.states[agent], "action", action[agent])
             if self.agent_performing_task[agent] is not None:
                 self.warehouse_api.set_task_(self.agent_performing_task[agent])
-            v = self.warehouse_api.step(self.states[agent], action[agent])
-            #print("return from Rust", v, "task: ", self.warehouse_api.task_racks[self.warehouse_api.get_current_task()])
-            # choose one of the v, 
-            ind = random.choices(
-                list(range(len(v))), weights=[sprime[1] for sprime in v]
-            )
-            ind0 = ind[0]
-            observations[agent] = {"a": v[ind0][0][0], "c": v[ind0][0][1]}
-            self.agent_obs[agent] = observations[agent]
-            self.agent_rack_positions[agent] = v[ind0][0][2]
-            
-            if self.agent_rack_positions[agent] is not None:
-                # for the current agent task move the rack, then on successful task completion
-                # delete this rack position
-                self.current_rack_positions[self.agent_performing_task[agent]] = \
-                    self.agent_rack_positions[agent]
+                #print(f"agent: {agent}, state: {self.states[agent]}, action: {action[agent]}")
+                v = self.warehouse_api.step(self.states[agent], action[agent])
+                #print("return from Rust", v, "task: ", self.warehouse_api.task_racks[self.warehouse_api.get_current_task()])
+                # choose one of the v, 
+                ind = random.choices(
+                    list(range(len(v))), weights=[sprime[1] for sprime in v]
+                )
+                ind0 = ind[0]
+                observations[agent] = {"a": v[ind0][0][0], "c": v[ind0][0][1]}
+                self.agent_obs[agent] = observations[agent]
+                self.agent_rack_positions[agent] = v[ind0][0][2]
                 
-                if action[agent] == 4 and \
-                    observations[agent]["a"] in self.warehouse_api.racks and \
-                        self.agent_task_status[agent] == self.AgentWorkingStatus.WORKING:
-                    self.orig_rack_positions[self.agent_performing_task[agent]] = \
-                        observations[agent]["a"]
-            if action[agent] == 5 and self.agent_rack_positions[agent] is None:
-                #print(f"Agent performing task {self.agent_performing_task[agent]} "
-                #      f"put down rack at {self.orig_rack_positions[self.agent_performing_task[agent]]}")
-                if self.agent_performing_task[agent] in self.current_rack_positions.keys():
-                    if self.current_rack_positions[self.agent_performing_task[agent]] == \
-                        self.orig_rack_positions[self.agent_performing_task[agent]]:
-                        # then delete both of them
-                        self.orig_rack_positions.pop(self.agent_performing_task[agent], None)
-                        self.current_rack_positions.pop(self.agent_performing_task[agent], None)
+                if self.agent_rack_positions[agent] is not None:
+                    # for the current agent task move the rack, then on successful task completion
+                    # delete this rack position
+                    self.current_rack_positions[self.agent_performing_task[agent]] = \
+                        self.agent_rack_positions[agent]
+                    
+                    if action[agent] == 4 and \
+                        observations[agent]["a"] in self.warehouse_api.racks and \
+                            self.agent_task_status[agent] == self.AgentWorkingStatus.WORKING:
+                        self.orig_rack_positions[self.agent_performing_task[agent]] = \
+                            observations[agent]["a"]
+                if action[agent] == 5 and self.agent_rack_positions[agent] is None:
+                    #print(f"Agent performing task {self.agent_performing_task[agent]} "
+                    #      f"put down rack at {self.orig_rack_positions[self.agent_performing_task[agent]]}")
+                    if self.agent_performing_task[agent] in self.current_rack_positions.keys():
+                        if self.current_rack_positions[self.agent_performing_task[agent]] == \
+                            self.orig_rack_positions[self.agent_performing_task[agent]]:
+                            # then delete both of them
+                            self.orig_rack_positions.pop(self.agent_performing_task[agent], None)
+                            self.current_rack_positions.pop(self.agent_performing_task[agent], None)
 
-            info[agent]["word"] = v[ind0][2]
-            rewards.append(-1)
-            dones=[False, False]
-            if v[ind0][0][2] is not None:
-                self.states[agent] = (
-                    tuple(v[ind0][0][0]),
-                    v[ind0][0][1], 
-                    tuple(v[ind0][0][2])
-                )
+                info[agent]["word"] = v[ind0][2]
+                rewards.append(-1)
+                dones=[False, False]
+                if v[ind0][0][2] is not None:
+                    self.states[agent] = (
+                        tuple(v[ind0][0][0]),
+                        v[ind0][0][1], 
+                        tuple(v[ind0][0][2])
+                    )
+                else:
+                    self.states[agent] = (
+                        tuple(v[ind0][0][0]),
+                        v[ind0][0][1], 
+                        None
+                    )
             else:
-                self.states[agent] = (
-                    tuple(v[ind0][0][0]),
-                    v[ind0][0][1], 
-                    None
-                )
+                observations[agent] = self.states[agent]
         self.renderer.render_step()
 
         return observations, rewards, dones, info
@@ -210,7 +213,7 @@ class Warehouse(gym.Env):
         
 
         # if an agent is carrying a rack draw this rack first
-        for k, v in self.current_rack_positions.items():
+        for _, v in self.current_rack_positions.items():
             pygame.draw.rect(
                 canvas,
                 (0, 0 ,255),
@@ -229,7 +232,7 @@ class Warehouse(gym.Env):
                 ),
             )
         
-        for k, v in self.orig_rack_positions.items():
+        for _, v in self.orig_rack_positions.items():
             pygame.draw.rect(
                     canvas,
                     (255, 255 ,255),

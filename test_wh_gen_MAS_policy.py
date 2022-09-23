@@ -23,7 +23,8 @@ task_progress = {0: "initial", 1: "in_progress", 2: "success", 3: "fail"}
 
 # Set the initial agent locations up front
 # We can set the feed points up front as well because they are static
-init_agent_positions = [(0, 0), (2, 9)]
+
+init_agent_positions = [(0, 0), (4, 0)]
 size = 10
 feedpoints = [(size - 1, size // 2)]
 print("Feed points", feedpoints)
@@ -42,10 +43,18 @@ env: Warehouse = gym.make(
     disable_env_checker=True,
 )
 # We have to set the tasks racks and task feeds which depend on the number of tasks
-env.warehouse_api.set_random_task_rack(NUM_TASKS)
-env.warehouse_api.set_random_task_feeds(NUM_TASKS)
+# sample a list of ranks in the size of the number of tasks
+rack_samples = random.sample([*env.warehouse_api.racks], k=NUM_TASKS + 1)
+#env.warehouse_api.add_task_rack_end(0, rack_samples[0])
+env.warehouse_api.add_task_rack_start(0, rack_samples[0])
+env.warehouse_api.add_task_feed(0, feedpoints[0])
+env.warehouse_api.add_task_rack_end(1, rack_samples[2])
+env.warehouse_api.add_task_rack_start(1, rack_samples[1])
+env.warehouse_api.add_task_feed(1, feedpoints[0])
+print("env start tasks: ", env.warehouse_api.task_racks_start)
+print("env start tasks: ", env.warehouse_api.task_racks_end)
 
-print("random task racks: ", env.warehouse_api.task_racks)
+print("random task racks: ", env.warehouse_api.task_racks_start)
 
 obs = env.reset()
 print("Initial observations: ", obs)
@@ -67,25 +76,26 @@ def warehouse_replenishment_task():
     omega = set(env.warehouse_api.words)
 
     # The first transition determines if the label is at the rack
-    task.add_transition(0, "R_NC", 1)
-    excluded_words = ['_'.join(x) for x in list(itertools.product(["R", "NFR", "F"], ["P", "D", "CR", "CNR"]))]
+    task.add_transition(0, "RS_NC", 1)
+    excluded_words = ['_'.join(x) for x in list(itertools.product(["RS", "RE", "NFR", "F"], ["P", "D", "CR", "CNR"]))]
+    excluded_words.append("RE_NC")
     for w in excluded_words: 
         task.add_transition(0, f"{w}", 7)
-    excluded_words.append("R_NC")
+    excluded_words.append("RS_NC")
     for w in omega.difference(set(excluded_words)):
         task.add_transition(0, f"{w}", 0)
     # The second transition determines whether the agent picked up the rack at the 
     # required coord
-    task.add_transition(1, "R_P", 2)
+    task.add_transition(1, "RS_P", 2)
     excluded_words = ['_'.join(x) for x in list(itertools.product(["NFR"], ["P"]))]
     for w in excluded_words:
         task.add_transition(1, f"{w}", 7)
-    excluded_words.append("R_P")
+    excluded_words.append("RS_P")
     for w in omega.difference(set(excluded_words)):
         task.add_transition(1, f"{w}", 1)
     # The third transition takes the agent to the feed position while carrying
     task.add_transition(2, "F_CNR", 3)
-    excluded_words = ['_'.join(x) for x in list(itertools.product(["F", "R", "NFR"], ["NC", "P", "D", "CR"]))]
+    excluded_words = ['_'.join(x) for x in list(itertools.product(["F", "RS", "RE", "NFR"], ["NC", "P", "D", "CR"]))]
     for w in excluded_words:
         task.add_transition(2, f"{w}", 7)
     excluded_words.append("F_CNR")
@@ -93,16 +103,71 @@ def warehouse_replenishment_task():
         task.add_transition(2, f"{w}", 2)
     # The fourth transition takes the agent from the feed position while carrying 
     # back to the rack position
-    task.add_transition(3, "R_CNR", 4)
-    excluded_words = ['_'.join(x) for x in list(itertools.product(["F", "R", "NFR"], ["NC", "P", "D", "CR"]))]
+    task.add_transition(3, "RS_CNR", 4)
+    excluded_words = ['_'.join(x) for x in list(itertools.product(["F", "RS", "RE", "NFR"], ["NC", "P", "D", "CR"]))]
+    #excluded_words.append("RS_CNR")
     for w in excluded_words:
         task.add_transition(3, f"{w}", 7)
-    excluded_words.append("R_CNR")
+    excluded_words.append("RS_CNR")
     for w in omega.difference(set(excluded_words)):
         task.add_transition(3, f"{w}", 3)
     # The fifth transition tells the agent to drop the rack at the required square
-    task.add_transition(4, "R_D", 5)
-    for w in omega.difference(set(["R_D"])):
+    task.add_transition(4, "RS_D", 5)
+    for w in omega.difference(set(["RS_D"])):
+        task.add_transition(4, f"{w}", 4)
+    for w in omega:
+        task.add_transition(5, f"{w}", 6)
+    for w in omega:
+        task.add_transition(6, f"{w}", 6)
+    for w in omega:
+        task.add_transition(7, f"{w}", 7)
+    
+    return task
+
+def warehouse_retry_task():
+    task = ce.DFA(list(range(0, 8)), 0, [5], [7], [6])
+    # attempt to goto the rack positon without carrying anything
+    omega = set(env.warehouse_api.words)
+
+    # The first transition determines if the label is at the rack
+    task.add_transition(0, "RS_NC", 1)
+    excluded_words = ['_'.join(x) for x in list(itertools.product(["RS", "RE", "NFR", "F"], ["P", "D", "CR", "CNR"]))]
+    excluded_words.append("RE_NC")
+    for w in excluded_words: 
+        task.add_transition(0, f"{w}", 7)
+    excluded_words.append("RS_NC")
+    for w in omega.difference(set(excluded_words)):
+        task.add_transition(0, f"{w}", 0)
+    # The second transition determines whether the agent picked up the rack at the 
+    # required coord
+    task.add_transition(1, "RS_P", 2)
+    excluded_words = ['_'.join(x) for x in list(itertools.product(["NFR", "RE"], ["P"]))]
+    for w in excluded_words:
+        task.add_transition(1, f"{w}", 7)
+    excluded_words.append("RS_P")
+    for w in omega.difference(set(excluded_words)):
+        task.add_transition(1, f"{w}", 1)
+    # The third transition takes the agent to the feed position while carrying
+    task.add_transition(2, "F_CNR", 3)
+    excluded_words = ['_'.join(x) for x in list(itertools.product(["F", "RS", "RE", "NFR"], ["NC", "P", "D", "CR"]))]
+    for w in excluded_words:
+        task.add_transition(2, f"{w}", 7)
+    excluded_words.append("F_CNR")
+    for w in omega.difference(set(excluded_words)):
+        task.add_transition(2, f"{w}", 2)
+    # The fourth transition takes the agent from the feed position while carrying 
+    # back to the rack position
+    task.add_transition(3, "RE_CNR", 4)
+    excluded_words = ['_'.join(x) for x in list(itertools.product(["F", "RS", "RE", "NFR"], ["NC", "P", "D", "CR"]))]
+    excluded_words.append("RS_CNR")
+    for w in excluded_words:
+        task.add_transition(3, f"{w}", 7)
+    excluded_words.append("RE_CNR")
+    for w in omega.difference(set(excluded_words)):
+        task.add_transition(3, f"{w}", 3)
+    # The fifth transition tells the agent to drop the rack at the required square
+    task.add_transition(4, "RE_D", 5)
+    for w in omega.difference(set(["RE_D"])):
         task.add_transition(4, f"{w}", 4)
     for w in omega:
         task.add_transition(5, f"{w}", 6)
@@ -118,9 +183,12 @@ mission = ce.Mission()
 
 # In this test there is only one task
 dfa = warehouse_replenishment_task()
+dfa_retry = warehouse_retry_task()
 # Add the task to the mission
-for k in range(NUM_TASKS):
-    mission.add_task(dfa)
+#for k in range(NUM_TASKS):
+mission.add_task(dfa)
+mission.add_task(dfa_retry)
+
 # specify the storage outputs for the executor to access data accoss the MOTAP interface
 
 # ------------------------------------------------------------------------------
@@ -134,24 +202,30 @@ w = [0] * NUM_AGENTS + [1./ NUM_TASKS] * NUM_TASKS
 #w[-1] = 1.
 #w = [1./ (NUM_AGENTS + NUM_TASKS)] * (NUM_AGENTS + NUM_AGENTS)
 eps = 0.0001
-target = [-55., -36., .97, .97]
+#target = [-80., -100., -120.] + [0.9] * 5
+#target = [-80., -150.] + [0.9] * 5
+target = [-80., -150.] + [0.7, 0.7]
 #
 #
 #
+sexecutor = ce.SerialisableExecutor(NUM_AGENTS)
+task_map = {0: 0, 1: 1}
 sol_not_found = True
 while sol_not_found:
     try:
-        tnew = ce.scheduler_synth(scpm, env.warehouse_api, w, target, eps, executor)
+        tnew = ce.scheduler_synth(scpm, env.warehouse_api, w, target, eps, sexecutor)
+        print(tnew)
         sol_not_found = False
-    except:
+    except Exception as e:
+        print(e)
         continue
 
 
+# ------------------------------------------------------------------------------
+# Execution: Construct a DFA transition function and build the Mission from this
+# ------------------------------------------------------------------------------
 
-## ------------------------------------------------------------------------------
-## Execution: Construct a DFA transition function and build the Mission from this
-## ------------------------------------------------------------------------------
-#
+executor = sexecutor.convert_to_executor(NUM_AGENTS, 2)
 
 while True:
     actions = [6] * NUM_AGENTS
@@ -163,11 +237,11 @@ while True:
             if task is not None:
                 env.agent_task_status[agent] = env.AgentWorkingStatus.WORKING
             if task is not None:
-                print("rack: ", env.warehouse_api.task_racks[task])
+                print("rack: ", env.warehouse_api.task_racks_end)
         else:
             # Check if the agent's task has been completed
             if env.agent_performing_task[agent] is not None:
-                status = executor.dfa_check_done(env.agent_performing_task[agent])
+                status = executor.check_done(env.agent_performing_task[agent])
                 #print("task: ", env.agent_performing_task[agent], "status: (", status, task_progress[status], ")")
                 if task_progress[status] in ["success", "fail"]:
                     print(f"Task {env.agent_performing_task[agent]} -> {task_progress[status]}")
