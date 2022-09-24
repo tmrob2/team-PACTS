@@ -38,8 +38,10 @@ pub struct Executor {
     schedulers: DefaultHashMap<(i32, i32), Vec<f64>>,
     #[pyo3(get)]
     agent_task_allocations: DefaultHashMap<i32, Vec<i32>>,
+    #[pyo3(get)]
+    priority_agent_allocations: DefaultHashMap<i32, Vec<i32>>,
     tasks: DefaultHashMap<i32, DFA>,
-    task_map: DefaultHashMap<i32, i32>,
+    task_map: DefaultHashMap<i32, (i32, i32)>,
 }
 
 #[pymethods]
@@ -47,31 +49,47 @@ impl Executor {
     #[new]
     fn new(nagents: usize) -> Executor {
         let mut init_agent_alloc: DefaultHashMap<i32, Vec<i32>> = DefaultHashMap::new();
+        let mut init_priority_agent_alloc: DefaultHashMap<i32, Vec<i32>> = DefaultHashMap::new();
         for agent in 0..nagents {
             init_agent_alloc.insert(agent as i32, Vec::new());
+            init_priority_agent_alloc.insert(agent as i32, Vec::new());
         }
 
         Executor { 
             state_maps: DefaultHashMap::new(), 
             schedulers: DefaultHashMap::new(), 
             agent_task_allocations: init_agent_alloc, 
+            priority_agent_allocations: init_priority_agent_alloc,
             tasks: DefaultHashMap::new(), 
             task_map: DefaultHashMap::new(), 
         }
     }
 
-    fn get_next_task(&mut self, agent: i32) -> Option<i32> {
-        match self.agent_task_allocations.get_mut(&agent) {
+    fn get_next_task(&mut self, agent: i32) -> (Option<i32>, i32) {
+        // Check if there are tasks in 
+        match self.priority_agent_allocations.get_mut(&agent) {
             Some(tasks_remaining) => { 
-                tasks_remaining.pop()
+                if tasks_remaining.len() > 0 {
+                    println!("agent {} priority tasks: {:?}", agent, tasks_remaining);
+                    (tasks_remaining.pop(), 1)
+                } else {
+                    match self.agent_task_allocations.get_mut(&agent) {
+                        Some(tasks_remaining) => { 
+                            (tasks_remaining.pop(), 0)
+                        }
+                        None => {
+                            (None, 0)
+                        }
+                    }
+                }
             }
             None => {
-                None
+                (None, 0)
             }
-        }
+        }        
     }
 
-    fn get_task_mapping(&self, task: i32) -> i32 {
+    fn get_task_mapping(&self, task: i32) -> (i32, i32) {
         *self.task_map.get(&task).unwrap()
     }
 
@@ -87,7 +105,8 @@ impl Executor {
         //println!("state: {:?}, q: {}", state, q);
         let sidx = *self.state_maps.get(&(agent, task)).unwrap()
             .get(&(state, q))
-            .expect(&format!("failed at {:?}", (state, q)));
+            .expect(&format!("agent: {}, failed at {:?}, task -> {}", 
+                agent, (state, q), task));
         let action = self.schedulers.get(&(agent, task)).unwrap()[sidx] as i32;
         action
     }
@@ -100,13 +119,13 @@ impl Executor {
         for agent in 0..num_agents {
             for task in 0..batch_size {
                 self.state_maps.insert(
-                    (agent as i32, *other.task_map.get(&(task as i32)).unwrap()), 
+                    (agent as i32, other.task_map.get(&(task as i32)).unwrap().0), 
                     other.state_maps.get_mut(&(agent as i32, task as i32)).unwrap().to_owned()
                 );
                 match other.schedulers.get_mut(&(agent as i32, task as i32)) {
                     Some(sch) => { 
                         self.schedulers.insert(
-                            (agent as i32, *other.task_map.get(&(task as i32)).unwrap()),
+                            (agent as i32, other.task_map.get(&(task as i32)).unwrap().0),
                             sch.to_owned() 
                         );
                     }
@@ -114,27 +133,72 @@ impl Executor {
                 }
                 
                 self.tasks.insert(
-                    *other.task_map.get(&(task as i32)).unwrap(),
+                    other.task_map.get(&(task as i32)).unwrap().0,
                     other.tasks.get(&(task as i32)).unwrap().to_owned()
                 );
             }
+            // Regular task allocations
             match self.agent_task_allocations.get_mut(&(agent as i32)) {
                 Some(tvec) => { 
-                    let new_alloc = other.agent_task_allocations.get(&(agent as i32)).unwrap();
-                    for t in new_alloc.iter() {
-                        tvec.push(*other.task_map.get(&(*t as i32)).unwrap()) 
-                    }
+                    match other.agent_task_allocations.get(&(agent as i32)) {
+                        Some(new_alloc) => {
+                            for t in new_alloc.iter() {
+                                if other.task_map.get(&(*t as i32)).unwrap().1 == 0 {
+                                    tvec.push(other.task_map.get(&(*t as i32)).unwrap().0); 
+                                }
+                            }
+                        }
+                        None => { }
+                    };
                 }
                 None => { 
                     let  mut tvnew = Vec::new();
-                    let new_alloc = other.agent_task_allocations.get(&(agent as i32)).unwrap();
-                    for t in new_alloc.iter() {
-                        tvnew.push(*other.task_map.get(&(*t as i32)).unwrap()) 
-                    }
-                    self.agent_task_allocations.insert(
-                        agent as i32, 
-                        tvnew
-                    );
+                    match other.agent_task_allocations.get(&(agent as i32)) {
+                        Some(new_alloc) => { 
+                            for t in new_alloc.iter() {
+                                if other.task_map.get(&(*t as i32)).unwrap().1 == 0 {
+                                    tvnew.push(other.task_map.get(&(*t as i32)).unwrap().0) 
+                                }
+                            }
+                            self.agent_task_allocations.insert(
+                                agent as i32, 
+                                tvnew
+                            );
+                        }
+                        None => { }
+                    };
+                }
+            }
+            // Priority task allocations
+            match self.priority_agent_allocations.get_mut(&(agent as i32)) {
+                Some(tvec) => { 
+                    match other.agent_task_allocations.get(&(agent as i32)) {
+                        Some(new_alloc) => {
+                            for t in new_alloc.iter() {
+                                if other.task_map.get(&(*t as i32)).unwrap().1 == 1 {
+                                    tvec.push(other.task_map.get(&(*t as i32)).unwrap().0); 
+                                }
+                            }
+                        }
+                        None => { }
+                    };
+                }
+                None => { 
+                    let  mut tvnew = Vec::new();
+                    match other.agent_task_allocations.get(&(agent as i32)) {
+                        Some(new_alloc) => { 
+                            for t in new_alloc.iter() {
+                                if other.task_map.get(&(*t as i32)).unwrap().1 == 1 {
+                                    tvnew.push(other.task_map.get(&(*t as i32)).unwrap().0) 
+                                }
+                            }
+                            self.agent_task_allocations.insert(
+                                agent as i32, 
+                                tvnew
+                            );
+                        }
+                        None => { }
+                    };
                 }
             }
         }
@@ -155,6 +219,12 @@ impl Executor {
     }
 }
 
+#[derive(Serialize, Deserialize)]
+struct TaskPriority{
+    task: i32, 
+    priority: i32
+}
+
 #[pyclass]
 #[derive(Serialize, Deserialize)]
 pub struct SerialisableExecutor {
@@ -162,7 +232,7 @@ pub struct SerialisableExecutor {
     schedulers: Vec<((i32, i32), Vec<f64>)>,
     agent_task_allocations: DefaultHashMap<i32, Vec<i32>>,
     task: DefaultHashMap<i32, DFA>,
-    task_map: DefaultHashMap<i32, i32>,
+    task_map: DefaultHashMap<i32, (i32, i32)>,
 }
 
 impl DefineSerialisableExecutor<State> for SerialisableExecutor {
@@ -247,7 +317,7 @@ impl SerialisableExecutor {
         serde_json::to_string(&self).unwrap()
     }
 
-    fn insert_task_map(&mut self, task_map: DefaultHashMap<i32, i32>) {
+    fn insert_task_map(&mut self, task_map: DefaultHashMap<i32, (i32, i32)>) {
         self.task_map = task_map; //Vec::from_iter(task_map.into_iter());
     }
 
@@ -259,6 +329,7 @@ impl SerialisableExecutor {
             state_maps: smap,
             schedulers: self.schedulers.drain(..).collect(), // Vector to hashmap creation
             agent_task_allocations: self.agent_task_allocations.drain().collect(),
+            priority_agent_allocations: DefaultHashMap::new(),
             tasks: self.task.drain().collect(),
             task_map: self.task_map.drain().collect(),
         }
@@ -296,7 +367,8 @@ pub struct Warehouse {
     pub task_feeds: HashMap<i32, Point>,
     #[pyo3(get)]
     pub words: [String; 25],
-    pub seed: u64
+    pub seed: u64,
+    pub psuccess: f64
 }
 
 #[pymethods]
@@ -308,7 +380,8 @@ impl Warehouse {
         feedpoints: Vec<Point>, 
         initial_locations: Vec<Point>,
         actions_to_dir: Vec<[i8; 2]>,
-        seed: u64
+        seed: u64,
+        psuccess: f64
     ) -> Self {
         // call the rack function
         let mut action_map: HashMap<u8, [i8; 2]> = HashMap::new();
@@ -338,7 +411,8 @@ impl Warehouse {
             task_racks_end: HashMap::new(),
             task_feeds: HashMap::new(),
             words,
-            seed
+            seed,
+            psuccess
         };
         // TODO finish testing of different minimal warehouse layouts.
         new_env.racks = new_env.place_racks(size);
@@ -347,9 +421,19 @@ impl Warehouse {
         //new_env.racks.insert((0, 2));
         new_env
     }
+
+    fn set_psuccess(&mut self, pnew: f64) {
+        self.psuccess = pnew;
+    }
     
     fn get_racks(&self) -> HashSet<Point> {
         self.racks.clone()
+    }
+
+    fn update_rack(&mut self, new_rack_pos: Point, old_rack_pos: Point) {
+        println!("Recieved a rack update: new: {:?}, old: {:?}", new_rack_pos, old_rack_pos);
+        self.racks.remove(&old_rack_pos);
+        self.racks.insert(new_rack_pos);
     }
 
     fn add_task_rack_start(&mut self, task: i32, rack: Point) {
@@ -514,7 +598,7 @@ impl Warehouse {
 
 impl Env<State> for Warehouse {
     fn step_(&self, state: State, action: u8) -> Result<Vec<(State, f64, String)>, String> {
-        let psuccess :f64 = 0.99;
+        let psuccess :f64 = self.psuccess;
         let mut v: Vec<(State, f64, String)> = Vec::new();
         if vec![0, 1, 2, 3].contains(&action) {
             let direction: &[i8; 2] = self.action_to_dir.get(&action).unwrap();
@@ -689,7 +773,6 @@ pub fn warehouse_scheduler_synthesis(
     
     // To construct a warehouse scheduler synthesis which is a wrapper around
     // the generic scheduler synthesis
-    println!("???");
     let result = 
         generic_scheduler_synthesis(model, env, w, eps, target, executor);
     

@@ -6,7 +6,6 @@ import json
 import inquirer
 from utils.event_thread import EventThread
 
-
 #
 # Params
 #
@@ -21,8 +20,7 @@ class TaskOptions:
     SEND_POISON = 'tear down listener'
     SEND_CONTINUOUS = 'task stream'
     STOP_CONTINUOUS = 'stop task stream'
-
-
+    FAILURE = "process failure"
 
 r = redis.Redis(host='localhost', port=6379, db=0)
 p = r.pubsub()
@@ -39,18 +37,6 @@ if __name__ == "__main__":
     task_counter = 0
     continous_tasks = False
     while True:
-        message = p.get_message()
-        if message:
-            # message is a string and we want to try and convert it to a task
-            try:
-                if message['channel'] == 'executor-channel':
-                    data_ = message["data"].decode('utf-8')
-                    #print("data_", data_)
-                    data = json.loads(data_)
-                    if data['event_type'] == 'task_failure':
-                        print("task failure received", data)
-            except:
-                print("Could not decode message")
         if not continous_tasks:
             questions = [
                 inquirer.List('task',
@@ -59,7 +45,8 @@ if __name__ == "__main__":
                                         TaskOptions.SEND_ONE,
                                         TaskOptions.SEND_BATCH,
                                         TaskOptions.SEND_POISON,
-                                        TaskOptions.SEND_CONTINUOUS
+                                        TaskOptions.SEND_CONTINUOUS,
+                                        TaskOptions.FAILURE
                                     ]
                 )
             ]
@@ -82,6 +69,10 @@ if __name__ == "__main__":
                 break
             elif answers['task'] == TaskOptions.SEND_CONTINUOUS:
                 continous_tasks = True
+            elif answers['task'] == TaskOptions.FAILURE:
+                event_thread.queue.put(
+                    {'event': TaskOptions.FAILURE}
+                )
         else:
             
             questions = [
@@ -93,11 +84,9 @@ if __name__ == "__main__":
                                     ]
                 )
             ]
-
             answers = inquirer.prompt(questions, theme=inquirer.themes.GreenPassion())
             if answers["task"] == TaskOptions.STOP_CONTINUOUS:
                 continous_tasks = False
-
             elif answers["task"] == TaskOptions.SEND_POISON:
                 event_thread.queue.put({
                     'event': TaskOptions.SEND_POISON

@@ -44,13 +44,14 @@ env: Warehouse = gym.make(
 )
 # We have to set the tasks racks and task feeds which depend on the number of tasks
 # sample a list of ranks in the size of the number of tasks
-rack_samples = random.sample([*env.warehouse_api.racks], k=NUM_TASKS + 1)
+rack_samples = random.sample([*env.warehouse_api.racks], k=NUM_TASKS * 2)
 #env.warehouse_api.add_task_rack_end(0, rack_samples[0])
-env.warehouse_api.add_task_rack_start(0, rack_samples[0])
-env.warehouse_api.add_task_feed(0, feedpoints[0])
-env.warehouse_api.add_task_rack_end(1, rack_samples[2])
-env.warehouse_api.add_task_rack_start(1, rack_samples[1])
-env.warehouse_api.add_task_feed(1, feedpoints[0])
+#env.warehouse_api.add_task_rack_start(0, rack_samples[0])
+#env.warehouse_api.add_task_feed(0, feedpoints[0])
+for k in range(NUM_TASKS):
+    env.warehouse_api.add_task_rack_end(k, rack_samples[NUM_TASKS + k])
+    env.warehouse_api.add_task_rack_start(k, rack_samples[0])
+    env.warehouse_api.add_task_feed(k, feedpoints[0])
 print("env start tasks: ", env.warehouse_api.task_racks_start)
 print("env start tasks: ", env.warehouse_api.task_racks_end)
 
@@ -63,9 +64,7 @@ print("Agent rack positions: ", env.agent_rack_positions)
 # ------------------------------------------------------------------------------
 # Executor: Define a new executor which will be used to continually run agents
 # ------------------------------------------------------------------------------
-
-executor = ce.Executor(NUM_AGENTS)
-
+s_executor = ce.SerialisableExecutor(NUM_AGENTS)
 # ------------------------------------------------------------------------------
 # Tasks: Construct a DFA transition function and build the Mission from this
 # ------------------------------------------------------------------------------
@@ -185,9 +184,9 @@ mission = ce.Mission()
 dfa = warehouse_replenishment_task()
 dfa_retry = warehouse_retry_task()
 # Add the task to the mission
-#for k in range(NUM_TASKS):
-mission.add_task(dfa)
-mission.add_task(dfa_retry)
+for k in range(NUM_TASKS):
+#mission.add_task(dfa)
+    mission.add_task(dfa_retry)
 
 # specify the storage outputs for the executor to access data accoss the MOTAP interface
 
@@ -204,16 +203,14 @@ w = [0] * NUM_AGENTS + [1./ NUM_TASKS] * NUM_TASKS
 eps = 0.0001
 #target = [-80., -100., -120.] + [0.9] * 5
 #target = [-80., -150.] + [0.9] * 5
-target = [-80., -150.] + [0.7, 0.7]
-#
-#
-#
-sexecutor = ce.SerialisableExecutor(NUM_AGENTS)
+target = [-80., -150.] + [0.7] * NUM_TASKS
+
+
 task_map = {0: 0, 1: 1}
 sol_not_found = True
 while sol_not_found:
     try:
-        tnew = ce.scheduler_synth(scpm, env.warehouse_api, w, target, eps, sexecutor)
+        tnew = ce.scheduler_synth(scpm, env.warehouse_api, w, target, eps, s_executor)
         print(tnew)
         sol_not_found = False
     except Exception as e:
@@ -222,19 +219,23 @@ while sol_not_found:
 
 
 # ------------------------------------------------------------------------------
-# Execution: Construct a DFA transition function and build the Mission from this
+# Rendering: Render an executor
 # ------------------------------------------------------------------------------
 
-executor = sexecutor.convert_to_executor(NUM_AGENTS, 2)
+executor = s_executor.convert_to_executor(NUM_AGENTS, NUM_TASKS)
 
 while True:
+    # Initialise the actions to do nothing
     actions = [6] * NUM_AGENTS
     for agent in range(NUM_AGENTS):
+        # Condition: If the agent is not working then it is available to work
+        # on a new task
         if env.agent_task_status[agent] == env.AgentWorkingStatus.NOT_WORKING:
             task = executor.get_next_task(agent)
             env.agent_performing_task[agent] = task
             env.states[agent] = (env.states[agent][0], 0, None)
             if task is not None:
+                # Update the agent as working on a task and store in the env
                 env.agent_task_status[agent] = env.AgentWorkingStatus.WORKING
             if task is not None:
                 print("rack: ", env.warehouse_api.task_racks_end)
@@ -242,24 +243,23 @@ while True:
             # Check if the agent's task has been completed
             if env.agent_performing_task[agent] is not None:
                 status = executor.check_done(env.agent_performing_task[agent])
-                #print("task: ", env.agent_performing_task[agent], "status: (", status, task_progress[status], ")")
                 if task_progress[status] in ["success", "fail"]:
                     print(f"Task {env.agent_performing_task[agent]} -> {task_progress[status]}")
                     # goto the the next task
                     env.agent_task_status[agent] = env.AgentWorkingStatus.NOT_WORKING
                     env.agent_rack_positions[agent] = None
-                    # todo add cleanup method here to remove the completed tasks from memory
 
         # With the current task check what the dfa state is
         if env.agent_performing_task[agent] is not None:
             q = executor.dfa_current_state(env.agent_performing_task[agent])
+            # Set the current task in the environment
             env.warehouse_api.set_task_(env.agent_performing_task[agent])
-            #print("lookup state: ", env.get_state(agent), "task", agent_performings_task[agent], "q", q)
+            # Get the action from the scheduler stored in the executor
             actions[agent] = executor.get_action(agent, env.agent_performing_task[agent], env.states[agent], q)
 
-            # step the agent forward one timestep
+    # step the agent forward one timestep
     obs, rewards, dones, info = env.step(actions)
-    #print("words", info)
+
 
     # Step the DFA forward
     for agent in range(NUM_AGENTS):
@@ -268,5 +268,3 @@ while True:
             q = executor.dfa_current_state(current_task)
             executor.dfa_next_state(current_task, q, info[agent]["word"])
             qprime = executor.dfa_current_state(current_task)
-            #print(f"Agent {0} state: {(obs[0]['a'], obs[0]['c'], env.agent_rack_positions[0])}"
-            #      f"-> , action: {actions[agent]}, word: {info[agent]['word']}, Q': {qprime}")

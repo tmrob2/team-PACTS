@@ -8,7 +8,7 @@ import ce
 import random
 
 class Warehouse(gym.Env):
-    metadata = {"render_modes": ["human", "rgb_array", "single_rgb_array"], "render_fps": 4}
+    metadata = {"render_modes": ["human", "rgb_array", "single_rgb_array"], "render_fps": 10}
 
     class TaskStatus: 
         INPROGESS = 0
@@ -26,13 +26,14 @@ class Warehouse(gym.Env):
         nagents: int = 1,
         render_mode: Optional[str] = None, 
         size = 20,
-        seed = 4321
+        seed = 4321,
+        prob = 0.99
         ):
         actions_to_dir = [[1, 0],[0, 1],[-1, 0],[0, -1]]
         # use the initialisation function to setup the Rust version of the warehouse 
         # as well
         self.warehouse_api = ce.Warehouse(
-            size, nagents, feedpoints, initial_agent_loc, actions_to_dir, seed
+            size, nagents, feedpoints, initial_agent_loc, actions_to_dir, seed, prob
         )
         assert render_mode is None or render_mode in self.metadata["render_modes"]
         self.render_mode = render_mode
@@ -48,6 +49,8 @@ class Warehouse(gym.Env):
         self.states = [(initial_agent_loc[i], 0, None) for i in range(nagents)]
         self.agent_performing_task = [None] * nagents
         self.agent_task_status = [self.AgentWorkingStatus.NOT_WORKING] * nagents
+        self.failure_task_progress = {}
+        self.agent_working_priority = [0] * nagents
         # agent locations
 
         # Observations are dictionaries with the agent's and target's locatoin
@@ -232,8 +235,9 @@ class Warehouse(gym.Env):
                 ),
             )
         
-        for _, v in self.orig_rack_positions.items():
-            pygame.draw.rect(
+        for k, v in self.orig_rack_positions.items():
+            if k in self.current_rack_positions.keys() and v != self.current_rack_positions[k]:
+                pygame.draw.rect(
                     canvas,
                     (255, 255 ,255),
                     pygame.Rect(

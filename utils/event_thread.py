@@ -10,20 +10,26 @@ import gym
 import pygame
 
 pygame.init()
-r = redis.Redis(host='localhost', port=6379, db=0)
-p = r.pubsub()
-p.subscribe('dfa-channel')
-p.subscribe('executor-channel') # need to listen for event failures
+
 
 class EventThread(Thread):
 
     class TaskEvent:
-        def __init__(self, rack_start, rack_end, feed, number):
+        def __init__(
+                self, 
+                rack_start, 
+                rack_end, 
+                feed, number, 
+                task_type=None, 
+                priority=None
+            ):
             self.event_type = "task"
             self.rack_start = rack_start
             self.feed = feed
             self.rack_end = rack_end
             self.number = number
+            self.task_type = task_type
+            self.priority = priority
 
     def __init__(
             self, 
@@ -39,6 +45,12 @@ class EventThread(Thread):
         self.daemon = True
         self.queue = queue
         self.task_counter = 0
+        self.failure_queue = []
+
+        self.r = redis.Redis(host='localhost', port=6379, db=0)
+        self.p = self.r.pubsub()
+        self.p.subscribe('dfa-channel')
+        self.p.subscribe('executor-channel') # need to listen for event failures
 
         self.FRAMES_PER_SECOND = 20
         self.milli_seconds_since_event = 0
@@ -54,6 +66,7 @@ class EventThread(Thread):
             render_mode=None,
             size=size,
             seed=4321,
+            prob=0.99,
             disable_env_checker=True,
         )
 
@@ -67,6 +80,8 @@ class EventThread(Thread):
                 self.send_k_tasks(val['k'])
             elif val['event'] == 'task stream':
                 self.continuous()
+            elif val['event'] == "process failure":
+                self.process_failed_tasks()
             elif val['event'] == 'stop task stream' or \
                      val['event'] == 'tear down listener':
                 self.send_poison_pill()
@@ -79,9 +94,9 @@ class EventThread(Thread):
     def one_task_event(self):
         rack = random.sample([*self.env.warehouse_api.racks], 1)
         feed = random.sample(self.env.warehouse_api.feedpoints, 1)
-        new_task = self.TaskEvent(rack, feed, rack, self.task_counter)
+        new_task = self.TaskEvent(rack, rack, feed, self.task_counter)
         msg = json.dumps(new_task.__dict__)
-        r.publish('dfa-channel', msg)
+        self.r.publish('dfa-channel', msg)
         self.task_counter += 1
 
     def send_k_tasks(self, k):
@@ -91,15 +106,18 @@ class EventThread(Thread):
         for _ in range(k):
             rack = racks_sample.pop()
             new_task = self.TaskEvent(
-                rack, feeds.pop(), rack, self.task_counter
+                rack, None, feeds.pop(), self.task_counter
             )
-            r.publish('dfa-channel', json.dumps(new_task.__dict__))
+            self.r.publish('dfa-channel', json.dumps(new_task.__dict__))
             self.task_counter += 1
         self.task_counter
 
+    def process_failed_tasks(self):
+        self.r.publish('dfa-channel', json.dumps({"event_type": "force_batch"}))
+
     def send_poison_pill(self):
         d = {"event_type": "end_stream"}
-        r.publish("dfa-channel", json.dumps(d))
+        self.r.publish("dfa-channel", json.dumps(d))
 
     def continuous(self):
         milliseconds_since_event += self.clock.tick(self.FRAMES_PER_SECOND)

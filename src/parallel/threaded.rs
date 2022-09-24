@@ -85,8 +85,7 @@ fn compute_value<S>(
     ntasks: usize
 ) -> (MOProductMDP<S>, Vec<f64>, Vec<f64>)
 where S: Copy + Hash + Eq {
-    println!("Starting value iteration");
     let (pi, r) = value_iteration(&mdp, &w[..], &eps, nagents, ntasks);
-    println!("mdp({},{}) -> {:.3?}", mdp.agent_id, mdp.task_id, r);
+    //println!("mdp({},{}) -> {:.3?}", mdp.agent_id, mdp.task_id, r);
     (mdp, pi, r)
 }
