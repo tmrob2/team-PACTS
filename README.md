@@ -9,7 +9,7 @@
 [![LinkedIn][linkedin-shield]][linkedin-url]
 -->
 [![Issues][issues-shield]][issues-url]
-[![Apache License][license-shield]][license-url]
+[![Apache-2.0 License][license-shield]][license-url]
 
 
 
@@ -556,7 +556,7 @@ Project Link: [https://github.com/tmrob2/team-PACTS](https://github.com/tmrob2/t
 [issues-shield]: https://img.shields.io/github/issues/tmrob2/team-PACTS.svg?style=for-the-badge
 [issues-url]: https://github.com/tmrob2/team-PACTS/issues
 [license-shield]: https://img.shields.io/github/license/tmrob2/team-PACTS.svg?style=for-the-badge
-[license-url]: https://github.com/tmrob2/team-PACTS/LICENSE
+[license-url]: https://github.com/tmrob2/team-PACTS/blob/master/LICENSE
 [linkedin-shield]: https://img.shields.io/badge/-LinkedIn-black.svg?style=for-the-badge&logo=linkedin&colorB=555
 [linkedin-url]: https://linkedin.com/in/linkedin_username
 [coll-avoidance]: img/12x12-4a-9t-collision-avoidance.gif
