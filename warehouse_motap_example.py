@@ -1,21 +1,19 @@
-import redis
 import warehouse 
 from warehouse.envs.warehouse import Warehouse
-import ce
-import argparse
 import gym
+import ce
+import random
+import numpy as np
+import random
+from enum import Enum
 import itertools
-import json
 
-# create a subscriber to listen to messages
-r = redis.Redis(host='localhost', port=6379, db=0)
+#
+# Params
+#
+NUM_TASKS = 2
+NUM_AGENTS = 2
 
-p = r.pubsub()
-p.subscribe('dfa-channel')
-p.subscribe('executor-channel')
-thread = None
-
-NUM_AGENTS = 3
 
 # ------------------------------------------------------------------------------
 # SETUP: Construct the structures for agent to recognise task progress
@@ -25,8 +23,11 @@ task_progress = {0: "initial", 1: "in_progress", 2: "success", 3: "fail"}
 
 # Set the initial agent locations up front
 # We can set the feed points up front as well because they are static
-init_agent_positions = [(0, 0), (4, 0), (0, 4)]
+
+init_agent_positions = [(0, 0), (4, 0)]
 size = 10
+feedpoints = [(size - 1, size // 2)]
+print("Feed points", feedpoints)
 
 # ------------------------------------------------------------------------------
 # Env Setup: Construct the warehouse model as an Open AI gym python environment
@@ -35,14 +36,24 @@ env: Warehouse = gym.make(
     "Warehouse-v0", 
     initial_agent_loc=init_agent_positions, 
     nagents=NUM_AGENTS,
-    feedpoints=[],
-    render_mode=None,
+    feedpoints=feedpoints,
+    render_mode="human",
     size=size,
     seed=4321,
-    prob=0.99,
     disable_env_checker=True,
 )
 # We have to set the tasks racks and task feeds which depend on the number of tasks
+# sample a list of ranks in the size of the number of tasks
+rack_samples = random.sample([*env.warehouse_api.racks], k=NUM_TASKS * 2)
+#env.warehouse_api.add_task_rack_end(0, rack_samples[0])
+#env.warehouse_api.add_task_rack_start(0, rack_samples[0])
+#env.warehouse_api.add_task_feed(0, feedpoints[0])
+for k in range(NUM_TASKS):
+    env.warehouse_api.add_task_rack_end(k, rack_samples[NUM_TASKS + k])
+    env.warehouse_api.add_task_rack_start(k, rack_samples[0])
+    env.warehouse_api.add_task_feed(k, feedpoints[0])
+print("env start tasks: ", env.warehouse_api.task_racks_start)
+print("env start tasks: ", env.warehouse_api.task_racks_end)
 
 print("random task racks: ", env.warehouse_api.task_racks_start)
 
@@ -50,6 +61,10 @@ obs = env.reset()
 print("Initial observations: ", obs)
 print("Agent rack positions: ", env.agent_rack_positions)
 
+# ------------------------------------------------------------------------------
+# Executor: Define a new executor which will be used to continually run agents
+# ------------------------------------------------------------------------------
+s_executor = ce.SerialisableExecutor(NUM_AGENTS)
 # ------------------------------------------------------------------------------
 # Tasks: Construct a DFA transition function and build the Mission from this
 # ------------------------------------------------------------------------------
@@ -62,6 +77,7 @@ def warehouse_replenishment_task():
     # The first transition determines if the label is at the rack
     task.add_transition(0, "RS_NC", 1)
     excluded_words = ['_'.join(x) for x in list(itertools.product(["RS", "RE", "NFR", "F"], ["P", "D", "CR", "CNR"]))]
+    excluded_words.append("RE_NC")
     for w in excluded_words: 
         task.add_transition(0, f"{w}", 7)
     excluded_words.append("RS_NC")
@@ -161,127 +177,94 @@ def warehouse_retry_task():
     
     return task
 
-task_progress = {0: "initial", 1: "in_progress", 2: "success", 3: "fail"}
+# Initialise the mission
+mission = ce.Mission()
 
-dfa1 = warehouse_replenishment_task()
-dfa2 = warehouse_retry_task()
+# In this test there is only one task
+dfa = warehouse_replenishment_task()
+dfa_retry = warehouse_retry_task()
+# Add the task to the mission
+for k in range(NUM_TASKS):
+#mission.add_task(dfa)
+    mission.add_task(dfa_retry)
+
+# specify the storage outputs for the executor to access data accoss the MOTAP interface
 
 # ------------------------------------------------------------------------------
-# Executor: Define a new executor which will be used to continually run agents
+# SCPM: Construct the SCPM structure which is a set of instructions on how to order the
+# product MDPs
 # ------------------------------------------------------------------------------
 
-if __name__ == "__main__":
+# Solve the product Model
+scpm = ce.SCPM(mission, NUM_AGENTS, list(range(6)))
+w = [0] * NUM_AGENTS + [1./ NUM_TASKS] * NUM_TASKS
+#w[-1] = 1.
+#w = [1./ (NUM_AGENTS + NUM_TASKS)] * (NUM_AGENTS + NUM_AGENTS)
+eps = 0.0001
+#target = [-80., -100., -120.] + [0.9] * 5
+#target = [-80., -150.] + [0.9] * 5
+target = [-80., -150.] + [0.7] * NUM_TASKS
 
-    parser = argparse.ArgumentParser(description='Task processing channel')
-    parser.add_argument('--interval', dest='interval', 
-        help='the interval of a batches before an SCPM is created and processed')
-    parser.add_argument('--eps', dest="eps", help="Epsilon value for value iteration")
-    args = parser.parse_args()
-    if not args.interval:
-        parser.error("interval must be included")
 
-    # A multiagent team to conduct a set of multiobjective missions
-    # constuct the environment
-    
-    
-    eps = 0.0001 if not args.eps else float(args.eps) # set the epsilon value for value iteration
+task_map = {0: 0, 1: 1}
+sol_not_found = True
+while sol_not_found:
+    try:
+        tnew = ce.scheduler_synth(scpm, env.warehouse_api, w, target, eps, s_executor)
+        print(tnew)
+        sol_not_found = False
+    except Exception as e:
+        print(e)
+        continue
 
-    batch_count = 0
-    force_batch = False
-    task_map = {}
-    mission = ce.Mission()
-    data_decoded = False
-    while True:
-        # get i interval messages from the channel before constructing an SCPM
-        message = p.get_message() # this is a redis framework method
-        # we need to collect a batch either by time interval or fixed count of 
-        # messages
-        if message:
-            # message is a string and we want to try and convert it to a task
-            #try:
-            if message['channel'] == b'executor-channel' \
-                and not isinstance(message['data'], int):
-                data_ = message['data'].decode('utf-8')
-                data = json.loads(data_)
-                if data['event_type'] == 'task_failure':
-                    rack_start = data['current_rack_position']
-                    rack_end = data['rack_start']
-                    number = data['task_number']
-                    # update the rack position in the warehouse for the next batch
-                    env.warehouse_api.add_task_rack_start(batch_count, tuple(rack_start))
-                    env.warehouse_api.add_task_feed(batch_count, tuple(data['feed']))
-                    env.warehouse_api.add_task_rack_end(batch_count, tuple(rack_end))
-                    env.warehouse_api.update_rack(tuple(rack_start), tuple(rack_end))
-                    mission.add_task(dfa2)
-                    task_map[batch_count] = (number, 1)
-                    print(f"Task failure: start {rack_start}, end: {rack_end}, feed: {data['feed']}")
-                    batch_count += 1
-                elif data['event_type'] == 'rack_update':
-                    print(f"updated rack position from {tuple(data['start_position'])}" 
-                          f"-> {tuple(data['original_position'])}")
-                    env.warehouse_api.update_rack(
-                        tuple(data['original_position']), 
-                        tuple(data['start_position'])
-                    )
-            elif message['channel'] == b'dfa-channel' \
-                and not isinstance(message['data'], int):
-                data_ = message["data"].decode('utf-8')
-                data = json.loads(data_)
-                if data['event_type'] == "task":
-                    print("Received Task Event", data)
-                    mission.add_task(dfa1)
-                    task_map[batch_count] = (data['number'], 0)
-                    env.warehouse_api.add_task_rack_start(batch_count, tuple(data['rack_start']))
-                    env.warehouse_api.add_task_feed(batch_count, tuple(data['feed']))
-                    batch_count += 1
-                elif data['event_type'] == 'end_stream':
-                    # send a poison pill to the thread
-                    print("received tear down event, ending listener")
-                    break
-                elif data['event_type'] == 'force_batch':
-                    print("received force event")
-                    force_batch = True
-                # construct and SCPM to process the tasks
 
-            if batch_count == int(args.interval) or force_batch:
-                if force_batch: 
-                    print("start", env.warehouse_api.task_racks_start)
-                    print("end", env.warehouse_api.task_racks_end)
-                    print("feed", env.warehouse_api.task_feeds)
-                    print("mission", mission.size)
+# ------------------------------------------------------------------------------
+# Rendering: Render an executor
+# ------------------------------------------------------------------------------
 
-                if mission.size > 0:
-                    
-                    print("batch count", batch_count) # check that the number of failed tasks is large enough
-                    executor = ce.SerialisableExecutor(NUM_AGENTS)
-                    w = [0] * NUM_AGENTS + [1./ batch_count] * batch_count
-                    # TODO Target needs to be dynamic 
-                    target = [-65., -65., 90.] + [0.7] * batch_count
-                    executor.insert_task_map(task_map)
-                    scpm = ce.SCPM(mission, NUM_AGENTS, list(range(6)))
-                    sol_not_found = True
-                    while sol_not_found:
-                        try:
-                            tnew = ce.scheduler_synth(
-                                scpm, env.warehouse_api, w, target, eps, executor
-                            )
-                            sol_not_found = False
-                        except:
-                            continue
-                    # send the executor over redis
-                    r.publish('executor-channel', json.dumps(
-                        {
-                            "event_type": "execute", 
-                            "executor": executor.to_json(),
-                            "task-feed": env.warehouse_api.task_feeds,
-                            "task-rack-start": env.warehouse_api.task_racks_start,
-                            "task-rack-end": env.warehouse_api.task_racks_end,
-                            "batch-size": batch_count
-                        }))
-                    # clean up 
-                    env.warehouse_api.clear_env()
-                    mission = ce.Mission()
-                    batch_count = 0
-                    task_map = {}
-                    if force_batch: force_batch = False
-                
+executor = s_executor.convert_to_executor(NUM_AGENTS, NUM_TASKS)
+
+while True:
+    # Initialise the actions to do nothing
+    actions = [6] * NUM_AGENTS
+    for agent in range(NUM_AGENTS):
+        # Condition: If the agent is not working then it is available to work
+        # on a new task
+        if env.agent_task_status[agent] == env.AgentWorkingStatus.NOT_WORKING:
+            task = executor.get_next_task(agent)
+            env.agent_performing_task[agent] = task
+            env.states[agent] = (env.states[agent][0], 0, None)
+            if task is not None:
+                # Update the agent as working on a task and store in the env
+                env.agent_task_status[agent] = env.AgentWorkingStatus.WORKING
+            if task is not None:
+                print("rack: ", env.warehouse_api.task_racks_end)
+        else:
+            # Check if the agent's task has been completed
+            if env.agent_performing_task[agent] is not None:
+                status = executor.check_done(env.agent_performing_task[agent])
+                if task_progress[status] in ["success", "fail"]:
+                    print(f"Task {env.agent_performing_task[agent]} -> {task_progress[status]}")
+                    # goto the the next task
+                    env.agent_task_status[agent] = env.AgentWorkingStatus.NOT_WORKING
+                    env.agent_rack_positions[agent] = None
+
+        # With the current task check what the dfa state is
+        if env.agent_performing_task[agent] is not None:
+            q = executor.dfa_current_state(env.agent_performing_task[agent])
+            # Set the current task in the environment
+            env.warehouse_api.set_task_(env.agent_performing_task[agent])
+            # Get the action from the scheduler stored in the executor
+            actions[agent] = executor.get_action(agent, env.agent_performing_task[agent], env.states[agent], q)
+
+    # step the agent forward one timestep
+    obs, rewards, dones, info = env.step(actions)
+
+
+    # Step the DFA forward
+    for agent in range(NUM_AGENTS):
+        current_task = env.agent_performing_task[agent]
+        if current_task is not None:
+            q = executor.dfa_current_state(current_task)
+            executor.dfa_next_state(current_task, q, info[agent]["word"])
+            qprime = executor.dfa_current_state(current_task)

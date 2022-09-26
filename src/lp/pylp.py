@@ -25,26 +25,30 @@ def hyperplane_solver(X, t, nobj):
     # solve the problem
     status = model.solve(solver)
     solution = [value(w[i]) for i in range(nobj)]
+    print("w: ", solution)
     return solution
+
 
 import cvxpy as cp
 
 def eucl_new_target(X, W, t, l, n):
-    
     z = cp.Variable(len(t)) # vector variable with shape (5,)
     #obj = cp.sum_squares(A @ z - t)
     obj = cp.norm(z - t, 2)
-    constraints = [
-        z <= t,
-    ]
+    constraints = [ ]
+
+    for i in range(n):
+        constraints.append(z[i] <= t[i] - 5.)
     
     for k in range(l):
         constraints.append(np.dot(W[k], X[k]) >= W[k] @ z)
 
     for i in range(n, len(t)):
-        constraints.append(z[i] >= max(t[i] - 0.01, 0.))
+        constraints.append(z[i] <= t[i])
+        constraints.append(z[i] >= 0)
     
     prob = cp.Problem(cp.Minimize(obj), constraints)
+    #print(prob)
     prob.solve()
     print("status", prob.status)
     print("optimal value", prob.value)
@@ -57,7 +61,7 @@ def randomised_scheduler(r, t, l, m, n):
     solver = CPLEX_CMD(path=cplex_dir, msg=False)
     c_dict = {}
     p_dict = {}
-    I = set([])
+    #I = set([])
 
     # convert r to a dictionary
     # we also have to collect the set of I, J, K here as well
@@ -77,8 +81,13 @@ def randomised_scheduler(r, t, l, m, n):
         for j in range(m):
             for k in range(l):
                 if f"{i}_{j}_{k}" in c_dict.keys():
-                    sum_var.append(v[f"{j}_{k}"] * c_dict[f"{i}_{j}_{k}"])
-        model += lpSum(sum_var) >= t[i]
+                    sum_var.append((v[f"{j}_{k}"], c_dict[f"{i}_{j}_{k}"]))
+                    #sum_var.append(v[f"{j}_{k}"] * c_dict[f"{i}_{j}_{k}"])
+        #model += lpSum(sum_var) >= t[i]
+        exp = LpAffineExpression(sum_var)
+        c = LpConstraint(exp, 1, name=f"cost{i}", rhs=t[i])
+        ep = c.makeElasticSubProblem(penalty=100, proportionFreeBoundList=[t[i], 0])
+        model.extend(ep)
 
     for j in range(m):
         model += lpSum([v[f"{j}_{k}"]*p_dict[f"{j}_{k}"] for k in range(l)]) >= t[n + j]
@@ -91,7 +100,8 @@ def randomised_scheduler(r, t, l, m, n):
     #print(model)
 
     status = model.solve(solver)
-    #print(status)
+    print("status", status)
     solution = [value(v[f"{j}_{k}"]) for j in range(m) for k in range(l)]
+    print("solution", solution)
     return solution
 

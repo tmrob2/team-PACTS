@@ -1,4 +1,5 @@
-use hashbrown::HashMap;
+//use hashbrown::HashMap;
+use std::collections::{HashMap, HashSet};
 use pyo3::prelude::*;
 use serde::{Serialize, Deserialize};
 use serde_json;
@@ -17,27 +18,77 @@ pub struct DFA {
     pub rejecting: Vec<i32>,
     #[pyo3(get)]
     pub done: Vec<i32>,
-    pub transitions: Vec<(i32, String, i32)>
+    pub transitions: HashMap<String, i32>,
+    pub current_state: i32,
+    words: HashSet<String>
+}
+
+/// Supply a convenience trait so that we can simply or create 
+/// words in the environment
+pub trait Expression<D> {
+    fn conversion(&self, q: i32, data: &D) -> String;
 }
 
 #[pymethods]
 impl DFA {
     #[new]
-    fn new(states: Vec<i32>, initial_state: i32, accepting: Vec<i32>, rejecting: Vec<i32>, done: Vec<i32>) -> Self {
-        DFA{
+    fn new(
+        states: Vec<i32>, 
+        initial_state: i32, 
+        accepting: Vec<i32>, 
+        rejecting: Vec<i32>, 
+        done: Vec<i32>
+    ) -> Self {
+        DFA {
             states, 
             name: "task".to_string(),
             initial_state, 
             accepting, 
             rejecting, 
             done, 
-            transitions: Vec::new()}
+            transitions: HashMap::new(),
+            current_state: 0,
+            words: HashSet::new()
+        }
     }
 
     fn add_transition(&mut self, q: i32, w: String, qprime: i32) {
-        if !self.transitions.contains(&(q, w.to_string(), qprime)) {
-            self.transitions.push((q, w, qprime));
+        self.transitions.insert(format!("{}-{}", q, w), qprime);
+    }
+
+    fn define_words(&mut self, words: HashSet<String>) {
+        for word in words.iter() {
+            self.words.insert(word.to_string());
         }
+    }
+
+    pub fn get_transition(&self, state: i32, word: &str) -> i32 {
+        let qprime = *self.transitions.get(&format!("{}-{}", state, word))
+            .expect(&format!("Count no find transition: {}-{}", state, word));
+        qprime
+    }
+
+    pub fn next(&mut self, state: i32, word: String) -> i32 {
+        let qprime = *self.transitions.get(&format!("{}-{}", state, word)).unwrap();
+        //println!("state: {}, word: {:?} -> q' {}", state, word, qprime);
+        self.current_state = qprime;
+        self.current_state
+    }
+
+    pub fn check_done(&self) -> u8 {
+        if self.done.contains(&self.current_state) {
+            2
+        } else if self.rejecting.contains(&self.current_state) {
+            3
+        } else if self.current_state == self.initial_state {
+            0
+        } else {
+            1
+        }
+    }
+
+    fn reset(&mut self) {
+        self.current_state = self.initial_state;
     }
 
     fn clone(&self) -> Self {
@@ -48,12 +99,10 @@ impl DFA {
             accepting: self.accepting.to_vec(), 
             rejecting: self.rejecting.to_vec(), 
             done: self.done.to_vec(), 
-            transitions: self.transitions.clone()
+            transitions: self.transitions.clone(),
+            current_state: 0,
+            words: self.words.clone()
         }
-    }
-
-    fn print_transitions(&self, words: Vec<String>) {
-        println!("{:?}", self.transitions);
     }
 
     fn json_serialize_dfa(&self) -> String {
@@ -66,16 +115,6 @@ impl DFA {
 pub fn json_deserialize_from_string(s: String) -> DFA {
     let task: DFA = serde_json::from_str(&s).unwrap();
     task
-}
-
-impl DFA {
-    pub fn construct_transition_hashmap(&self) -> HashMap<(i32, String), i32> {
-        let mut map: HashMap<(i32, String), i32> = HashMap::new();
-        for (q, w, qprime) in self.transitions.iter() {
-            map.insert((*q, w.to_string()), *qprime);
-        }
-        map
-    }
 }
 
 #[pyclass]
@@ -107,7 +146,41 @@ impl Mission {
         }
     }
 
-    fn get_task(&self, task_idx: usize) -> DFA {
+    pub fn get_task(&self, task_idx: usize) -> DFA {
         self.tasks[task_idx].clone()
+    }
+
+    pub fn step(&mut self, task: usize, q: i32, word: String) -> i32 {
+        self.tasks[task].next(q, word)
+    }
+
+    pub fn reset(&mut self, task: usize) {
+        self.tasks[task].reset()
+    }
+
+    pub fn check_done(&self, task: usize) -> u8 {
+        self.tasks[task].check_done()
+    }
+
+    pub fn check_mission_complete(&self) -> bool {
+        let mut complete: bool = true;
+        for task in self.tasks.iter() {
+            if task.accepting.contains(&task.current_state) 
+                || task.rejecting.contains(&task.current_state) {
+                // do nothing 
+            } else {
+                complete = false;
+            }
+        }
+        return complete
+    }
+
+    pub fn release_last_dfa(&mut self) -> Option<DFA> {
+        self.tasks.pop()
+    }
+
+    pub fn clear_mission(&mut self) {
+        self.tasks = Vec::new();
+        self.size = 0;
     }
 }

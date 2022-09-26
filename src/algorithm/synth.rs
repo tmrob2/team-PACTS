@@ -1,40 +1,78 @@
+//use array_macro::__core::num;
 use hashbrown::{HashMap, HashSet};
-use crate::scpm::model::{SCPM, MOProductMDP, GridState};
-use crate::{Mantissa, blas_dot_product, val_or_zero_one, solver, new_target};
+//use rand::seq::SliceRandom;
+//use crate::algorithm::dp::value_iteration;
+use crate::scpm::model::{SCPM, MOProductMDP};
+use crate::{Mantissa, blas_dot_product, solver, new_target};
 //use pyo3::prelude::*;
 use crate::parallel::threaded::process_mdps;
 use std::time::Instant;
+use std::hash::Hash;
+//use rand::thread_rng;
 
 //#[pyfunction]
 //#[pyo3(name="para_test")]
-pub fn process_scpm(
+pub fn process_scpm<S>(
     model: &SCPM, 
     w: &[f64], 
     eps: &f64,
-    prods: Vec<MOProductMDP>
-) -> (Vec<f64>, Vec<MOProductMDP>, HashMap<(i32, i32), Vec<f64>>, Vec<(i32, i32, Vec<f64>)>) {
+    prods: Vec<MOProductMDP<S>>,
+    target: &[f64]
+) -> (Vec<f64>, Vec<MOProductMDP<S>>, HashMap<(i32, i32), Vec<f64>>, Vec<(i32, i32, Vec<f64>)>) 
+where S: Send + Sync + Copy + Hash + Eq + 'static {
     // Algorithm 1 will need to follow this format
     // where we move the ownership of the product models into a function 
     // which processes them and then return those models again for reprocessing
-    let num_agents = model.agents.size;
+    let num_agents = model.num_agents;
     let num_tasks = model.tasks.size;
-    let (prods, mut pis, alloc_map, mut result) = process_mdps(prods, &w[..], &eps, num_agents, num_tasks).unwrap();
+    let (prods, 
+        mut pis, 
+        alloc_map, 
+        mut result) = process_mdps(
+        prods, &w[..], &eps, num_agents, num_tasks
+    ).unwrap();
     
     let mut r = vec![0.; num_agents + num_tasks];
     let mut alloc: Vec<(i32, i32, Vec<f64>)> = Vec::new();
+    let mut cost_: Vec<f64> = vec![0.; num_agents + num_tasks];
+    //println!("result: {:?}", result);
     for task in 0..model.tasks.size {
+        // add items from v_tot_cost until the cost is greater than the target then no more
+        // can be added to the agent
         let v_tot_cost = result.get_mut(&(task as i32)).unwrap(); // <- this will be a vector (agent, weighted cost)
+        // First try randomly permuting v_tot_cost to see if this solves the problem
         // sort the vector of (agent, tot cost) by cost
         v_tot_cost.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap()); // reflects maximisation
+        //println!("Sorted task alloc vec: {:?}", v_tot_cost);
+        // loop through the v_tot_cost until we find an agent whose cost threshold has not yet 
+        // been reached
+        let mut agent_selected: i32 = v_tot_cost[0].0;
+        for i in 0..v_tot_cost.len() {
+            let v_tot_cost_agent = v_tot_cost[i].0 as usize;
+            let v_tot_task_cost_ = v_tot_cost[i].2[v_tot_cost_agent];
+            //println!("cost compare agent: {}, new cost: {}, target: {}", 
+            //    v_tot_cost_agent, cost_[v_tot_cost_agent] + v_tot_task_cost_, target[v_tot_cost_agent]);
+            if cost_[v_tot_cost_agent] + v_tot_task_cost_ > target[v_tot_cost_agent] {
+                cost_[v_tot_cost_agent] += v_tot_task_cost_;
+                agent_selected = v_tot_cost_agent as i32;
+                break;
+            } else {
+                if i == v_tot_cost.len() - 1 {
+                    cost_[v_tot_cost_agent] += v_tot_task_cost_;
+                    agent_selected = v_tot_cost_agent as i32;
+                }
+            }
+        }
+        //println!("task: {}, cost: {:?}, target: {:?}", task, cost_, target);
         // get the allocation multi-objective vector for the task and add it to r
-        let rij = alloc_map.get(&(v_tot_cost[0].0, task as i32)).unwrap();
-        alloc.push((v_tot_cost[0].0, task as i32, rij.to_vec()));
+        let rij = alloc_map.get(&(agent_selected, task as i32)).unwrap();
+        alloc.push((agent_selected, task as i32, rij.to_vec()));
         // add the agent cost to the allocation rewards
-        r[v_tot_cost[0].0 as usize] += rij[0];
+        r[agent_selected as usize] += rij[0];
         // add the task cost to the allocation rewards
         r[num_agents + task] += rij[1];
-        for i in 0..model.agents.size {
-            if i as i32 != v_tot_cost[0].0 {
+        for i in 0..model.num_agents {
+            if i as i32 != agent_selected {
                 pis.remove(&(i as i32, task as i32));
             }
         }
@@ -42,48 +80,20 @@ pub fn process_scpm(
     (r, prods, pis, alloc)
 }
 
-fn retain_alloc_policies(alloc: &[GridState], pis: &mut HashMap<(i32, i32), Vec<f64>>) {
-    // alloc
-    pis.retain(|&(a, t), _| alloc.contains(&GridState::new(a, t)));
-}
-
-pub fn alloc_dfs(model: &SCPM, policy: Vec<f64>) -> Vec<GridState> {
-    // Use a stack to record the states we will see
-    let mut stack: Vec<GridState> = Vec::new();
-    // Use a visited vector to record the states seen
-    let mut visited: HashSet<GridState> = HashSet::new();
-    let mut allocation: HashSet<GridState> = HashSet::new();
-    // initialise the stack
-    stack.push(model.init_state);
-    visited.insert(model.init_state);
-    while !stack.is_empty() {
-        // retrieve an item from the back of the stack (FIFO)
-        let state = stack.pop().unwrap();
-        if state.task < model.tasks.size as i32 { // need to account for the terminal state
-            // for the given scheduler determine the transition of the popped state
-            let sidx = model.grid.state_mapping.get(&state).unwrap();
-            if policy[*sidx] == 0. {
-                allocation.insert(state);
-            }
-            match model.grid.transitions.get(&(state, policy[*sidx] as i32)) {
-                Some(sprime) => { 
-                    if !visited.contains(sprime) {
-                        stack.push(*sprime);
-                        visited.insert(*sprime);
-                    }
-                }
-                None => {  
-                    //panic!("No transitions found for ({:?}, {})", state, policy[*sidx])
-                }
-            }
-        }
-    }
-    allocation.into_iter().collect::<Vec<GridState>>()
-}
-
-
-pub fn scheduler_synthesis(model: &SCPM, w: &[f64], eps: &f64, t: &[f64], prods_: Vec<MOProductMDP>) 
--> (Vec<HashMap<(i32, i32), Vec<f64>>>, Vec<(i32, i32, i32, Vec<f64>)>, Vec<f64>, usize) {
+pub fn scheduler_synthesis<S>(
+    model: &SCPM, 
+    w: &[f64], 
+    eps: &f64, 
+    t: &[f64], 
+    prods_: Vec<MOProductMDP<S>>
+) -> (
+    HashMap<usize, HashMap<(i32, i32), Vec<f64>>>, 
+    Vec<(i32, i32, i32, Vec<f64>)>, 
+    Vec<f64>, 
+    usize,
+    Vec<MOProductMDP<S>>
+)
+where S: Send + Sync + Copy + Hash + Eq + 'static {
     let t1 = Instant::now();
     //let torig = t.to_vec();
     //println!("initial w: {:.3?}", w);
@@ -94,9 +104,9 @@ pub fn scheduler_synthesis(model: &SCPM, w: &[f64], eps: &f64, t: &[f64], prods_
     let mut weights: HashMap<usize, Vec<f64>> = HashMap::new();
     let mut weights_v: Vec<Vec<f64>> = Vec::new();
     let mut temp_weights_: Vec<Vec<f64>>;
-    let mut X: HashSet<Vec<Mantissa>> = HashSet::new();
+    //let mut X: HashSet<Vec<Mantissa>> = HashSet::new();
     let mut W: HashSet<Vec<Mantissa>> = HashSet::new();
-    let mut schedulers: Vec<HashMap<(i32, i32), Vec<f64>>> = Vec::new();
+    let mut schedulers: HashMap<usize, HashMap<(i32, i32), Vec<f64>>> = HashMap::new();
     let mut allocation_acc: Vec<(i32, i32, i32, Vec<f64>)> = Vec::new();
     //let num_agents = model.agents.size;
     //let num_tasks = model.tasks.size;
@@ -107,9 +117,9 @@ pub fn scheduler_synthesis(model: &SCPM, w: &[f64], eps: &f64, t: &[f64], prods_
     //w.append(&mut w2);
 
     // compute the initial point for the random weight vector
-    println!("Num agents: {}, Num tasks: {}", model.agents.size, model.tasks.size);
+    println!("Num agents: {}, Num tasks: {}", model.num_agents, model.tasks.size);
     let (r, prods_, pis, alloc) = process_scpm(
-        model, &w[..], &eps, prods 
+        model, &w[..], &eps, prods, &tnew[..],
     );
     for (agent_, task_, r_) in alloc.into_iter() {
         allocation_acc.push((0, agent_, task_, r_));
@@ -120,7 +130,7 @@ pub fn scheduler_synthesis(model: &SCPM, w: &[f64], eps: &f64, t: &[f64], prods_
 
     schedulers.insert(0, pis);
 
-    X.insert(r.iter().cloned().map(|f| Mantissa::new(f)).collect::<Vec<Mantissa>>());
+    //X.insert(r.iter().cloned().map(|f| Mantissa::new(f)).collect::<Vec<Mantissa>>());
     W.insert(w.iter().cloned().map(|f| Mantissa::new(f)).collect::<Vec<Mantissa>>());
     //println!("r init: {:.3?}", r);
     let wrl = blas_dot_product(&r[..], &w[..]);
@@ -137,7 +147,7 @@ pub fn scheduler_synthesis(model: &SCPM, w: &[f64], eps: &f64, t: &[f64], prods_
             tnew.to_vec(), 
             1, 
             //model.tasks.size,
-            model.agents.size, 
+            model.num_agents, 
         );
         match tnew_ {
             Ok(x) => {
@@ -159,9 +169,9 @@ pub fn scheduler_synthesis(model: &SCPM, w: &[f64], eps: &f64, t: &[f64], prods_
     weights_v.push(w.to_vec());
 
     let mut lpvalid = true;
-    let tot_objs = model.agents.size + model.tasks.size;
+    let tot_objs = model.num_agents + model.tasks.size;
 
-    let mut w: Vec<f64> = vec![0.; tot_objs];
+    //let mut w: Vec<f64> = vec![0.; tot_objs];
     prods = prods_;
     let mut count: usize = 1;
     
@@ -170,16 +180,15 @@ pub fn scheduler_synthesis(model: &SCPM, w: &[f64], eps: &f64, t: &[f64], prods_
         let lpresult = solver(hullset_X.to_vec(), tnew.to_vec(), tot_objs);
         //println!("LP result: {:.2?}", lpresult);
         match lpresult {
-            Ok(sol) => {
-                for (ix, val) in sol.iter().enumerate() {
+            Ok(_sol) => {
+                /*for (ix, val) in sol.iter().enumerate() {
                     if ix < tot_objs {
                         //println!(" w[{:?}] = {:.3}", ix, val);
                         w[ix] = val_or_zero_one(val);
                     }
-                }
+                }*/
                 let new_w = w
                     .iter()
-                    .clone()
                     .map(|f| Mantissa::new(*f))
                     .collect::<Vec<Mantissa>>();
                 match W.contains(&new_w) {
@@ -189,7 +198,7 @@ pub fn scheduler_synthesis(model: &SCPM, w: &[f64], eps: &f64, t: &[f64], prods_
                     }
                     false => { 
                         let (r, prods_, pis, alloc) = process_scpm(
-                            model, &w[..], &eps, prods
+                            model, &w[..], &eps, prods, &tnew[..]
                         );
 
                         for (agent_, task_, r_) in alloc.into_iter() {
@@ -212,7 +221,7 @@ pub fn scheduler_synthesis(model: &SCPM, w: &[f64], eps: &f64, t: &[f64], prods_
                                 tnew.to_vec(), 
                                 hullset_X.len(), 
                                 //model.tasks.size,
-                                model.agents.size, 
+                                model.num_agents, 
                             );
                             match tnew_ {
                                 Ok(x) => {
@@ -244,5 +253,5 @@ pub fn scheduler_synthesis(model: &SCPM, w: &[f64], eps: &f64, t: &[f64], prods_
         }
     }
     println!("Time: {:.3}", t1.elapsed().as_secs_f32());
-    (schedulers, allocation_acc, tnew, count)
+    (schedulers, allocation_acc, tnew, count, prods)
 }
