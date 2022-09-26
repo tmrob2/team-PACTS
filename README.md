@@ -75,7 +75,17 @@ The following diagram presents a high level system design of planning and task a
 
 ### Smart Warehouse Example Implementation
 
-| [![Example 1][coll-avoidance]](https://github/tmrob2/rusty-robots/) | [![Example 2][task-stream-example]](https://github/tmrob2/team-PACTS/) |
+<table>
+<tr>
+<td>
+<img src="https://github/tmrob2/rusty-robots/img/12x12-4a-9t-collision-avoidance.gif" width="400" height="400">
+</td>
+<td>
+<img src="https://github.com/tmrob2/team-PACTS/blob/low_mem/img/cts_example_sw.gif" width="400" height="400">
+</td>
+</tr>
+</table>
+
 
 
 
@@ -244,7 +254,7 @@ Project Link: [https://github.com/tmrob2/team-PACTS](https://github.com/tmrob2/t
 [linkedin-shield]: https://img.shields.io/badge/-LinkedIn-black.svg?style=for-the-badge&logo=linkedin&colorB=555
 [linkedin-url]: https://linkedin.com/in/linkedin_username
 [coll-avoidance]: img/12x12-4a-9t-collision-avoidance.gif
-[task-steam-example]: img/cts_example_sw.gif
+[task-stream-example]: img/cts_example_sw.gif
 [mdp-example]: img/product_mdp_message_sending.png
 
     
