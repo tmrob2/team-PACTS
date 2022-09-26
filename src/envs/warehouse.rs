@@ -356,6 +356,7 @@ pub struct Warehouse {
     pub feedpoints: Vec<Point>,
     #[pyo3(get)]
     pub racks: HashSet<Point>,
+    pub original_racks: HashSet<Point>,
     #[pyo3(get)]
     pub agent_initial_locs: Vec<Point>,
     pub action_to_dir: HashMap<u8, [i8; 2]>,
@@ -405,6 +406,7 @@ impl Warehouse {
             nagents,
             feedpoints,
             racks: HashSet::new(),
+            original_racks: HashSet::new(),
             agent_initial_locs: initial_locations,
             action_to_dir: action_map,
             task_racks_start: HashMap::new(),

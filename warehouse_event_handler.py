@@ -5,6 +5,9 @@ import redis
 import json
 import inquirer
 from utils.event_thread import EventThread
+import pygame
+
+pygame.init()
 
 #
 # Params
@@ -32,6 +35,13 @@ failed_task_queue = []
 q = Queue()
 event_thread = EventThread(q, NUM_AGENTS, init_agent_positions, feedpoints, size)
 event_thread.start()
+
+FRAMES_PER_SECOND = 20
+milliseconds_since_event = 0
+milliseconds_until_event = random.randint(500, 2000)
+clock = pygame.time.Clock()
+state = 0
+
 
 if __name__ == "__main__":
     task_counter = 0
@@ -66,7 +76,6 @@ if __name__ == "__main__":
                 event_thread.queue.put({
                     'event': TaskOptions.SEND_POISON
                 })
-                break
             elif answers['task'] == TaskOptions.SEND_CONTINUOUS:
                 continous_tasks = True
             elif answers['task'] == TaskOptions.FAILURE:
@@ -74,24 +83,41 @@ if __name__ == "__main__":
                     {'event': TaskOptions.FAILURE}
                 )
         else:
-            
-            questions = [
-                inquirer.List('task',
-                            message="Choose a task option",
-                            choices=[
-                                        TaskOptions.STOP_CONTINUOUS,
-                                        TaskOptions.SEND_POISON,
-                                    ]
-                )
-            ]
-            answers = inquirer.prompt(questions, theme=inquirer.themes.GreenPassion())
-            if answers["task"] == TaskOptions.STOP_CONTINUOUS:
-                continous_tasks = False
-            elif answers["task"] == TaskOptions.SEND_POISON:
-                event_thread.queue.put({
-                    'event': TaskOptions.SEND_POISON
-                })
-                break
+            milliseconds_since_event += clock.tick(FRAMES_PER_SECOND)
+
+            # handle input here
+
+            if milliseconds_since_event > milliseconds_until_event:
+                # perform random event
+                if state == 0:
+                    event_thread.queue.put(
+                        {'event': TaskOptions.SEND_BATCH, 'k': 10}
+                    )
+                    state += 1
+                else:
+                    event_thread.queue.put(
+                        {'event': TaskOptions.FAILURE}
+                    )
+                    state = 0
+                milliseconds_until_event = random.randint(5000, 15000)
+                milliseconds_since_event = 0
+            #questions = [
+            #    inquirer.List('task',
+            #                message="Choose a task option",
+            #                choices=[
+            #                            TaskOptions.STOP_CONTINUOUS,
+            #                            TaskOptions.SEND_POISON,
+            #                        ]
+            #    )
+            #]
+            #answers = inquirer.prompt(questions, theme=inquirer.themes.GreenPassion())
+            #if answers["task"] == TaskOptions.STOP_CONTINUOUS:
+            #    continous_tasks = False
+            #elif answers["task"] == TaskOptions.SEND_POISON:
+            #    event_thread.queue.put({
+            #        'event': TaskOptions.SEND_POISON
+            #    })
+            #    break
             
 
     

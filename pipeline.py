@@ -249,37 +249,39 @@ if __name__ == "__main__":
                     print("end", env.warehouse_api.task_racks_end)
                     print("feed", env.warehouse_api.task_feeds)
                     print("mission", mission.size)
+
+                if mission.size > 0:
                     
-                print("batch count", batch_count)
-                executor = ce.SerialisableExecutor(NUM_AGENTS)
-                w = [0] * NUM_AGENTS + [1./ batch_count] * batch_count
-                # TODO Target needs to be dynamic 
-                target = [-65., -65., 90.] + [0.7] * batch_count
-                executor.insert_task_map(task_map)
-                scpm = ce.SCPM(mission, NUM_AGENTS, list(range(6)))
-                sol_not_found = True
-                while sol_not_found:
-                    try:
-                        tnew = ce.scheduler_synth(
-                            scpm, env.warehouse_api, w, target, eps, executor
-                        )
-                        sol_not_found = False
-                    except:
-                        continue
-                # send the executor over redis
-                r.publish('executor-channel', json.dumps(
-                    {
-                        "event_type": "execute", 
-                        "executor": executor.to_json(),
-                        "task-feed": env.warehouse_api.task_feeds,
-                        "task-rack-start": env.warehouse_api.task_racks_start,
-                        "task-rack-end": env.warehouse_api.task_racks_end,
-                        "batch-size": batch_count
-                    }))
-                # clean up 
-                env.warehouse_api.clear_env()
-                mission = ce.Mission()
-                batch_count = 0
-                task_map = {}
-                if force_batch: force_batch = False
+                    print("batch count", batch_count) # check that the number of failed tasks is large enough
+                    executor = ce.SerialisableExecutor(NUM_AGENTS)
+                    w = [0] * NUM_AGENTS + [1./ batch_count] * batch_count
+                    # TODO Target needs to be dynamic 
+                    target = [-65., -65., 90.] + [0.7] * batch_count
+                    executor.insert_task_map(task_map)
+                    scpm = ce.SCPM(mission, NUM_AGENTS, list(range(6)))
+                    sol_not_found = True
+                    while sol_not_found:
+                        try:
+                            tnew = ce.scheduler_synth(
+                                scpm, env.warehouse_api, w, target, eps, executor
+                            )
+                            sol_not_found = False
+                        except:
+                            continue
+                    # send the executor over redis
+                    r.publish('executor-channel', json.dumps(
+                        {
+                            "event_type": "execute", 
+                            "executor": executor.to_json(),
+                            "task-feed": env.warehouse_api.task_feeds,
+                            "task-rack-start": env.warehouse_api.task_racks_start,
+                            "task-rack-end": env.warehouse_api.task_racks_end,
+                            "batch-size": batch_count
+                        }))
+                    # clean up 
+                    env.warehouse_api.clear_env()
+                    mission = ce.Mission()
+                    batch_count = 0
+                    task_map = {}
+                    if force_batch: force_batch = False
                 

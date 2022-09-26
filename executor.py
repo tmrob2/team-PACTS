@@ -8,6 +8,7 @@ import argparse
 import gym
 import itertools
 import json
+from utils.gym_to_gif import save_frames_as_gif
 
 batch_size = 5
 num_agents = 3
@@ -27,7 +28,7 @@ env: Warehouse = gym.make(
     initial_agent_loc=init_agent_positions, 
     nagents=num_agents,
     feedpoints=feedpoints,
-    render_mode="human",
+    render_mode="rgb_array",
     size=size,
     seed=4321,
     prob=0.99,
@@ -43,12 +44,16 @@ task_progress = {0: "initial", 1: "in_progress", 2: "success", 3: "fail"}
 base_exec = ce.Executor(num_agents)
 env.reset()
 
+frames = []
+
+
 while True:
     message = p.get_message()
     # we need to collect a batch either by time interval or fixed count of 
     # messages
     if message:
         #print(message.keys())
+        #print(message)
         # message is a string and we want to try and convert it to a task
         if message['channel'] == b'executor-channel' \
             and not isinstance(message['data'], int):
@@ -174,14 +179,21 @@ while True:
         if env.agent_performing_task[agent] is not None:
             q = base_exec.dfa_current_state(env.agent_performing_task[agent])
             env.warehouse_api.set_task_(env.agent_performing_task[agent])
-            actions[agent] = base_exec.get_action(agent, env.agent_performing_task[agent], env.states[agent], q)
+            try:
+                actions[agent] = base_exec.get_action(agent, env.agent_performing_task[agent], env.states[agent], q)
+            except:
+                print(env.warehouse_api.racks)
 
     # step the agent forward one timestep
     if 1 in env.agent_working_priority:
         env.warehouse_api.set_psuccess(1.0)
         actions = [a if env.agent_working_priority[i] == 1 else 6 for (i, a) in enumerate(actions)]
         # update the environment with the rack positions
-        print(actions)
+        #print(actions)
+    if any(i for i in actions if i != 6):
+        #print("rendering frame")
+        env.renderer.render_step()
+        frames.append(env.render())
     obs, rewards, dones, info = env.step(actions)
 
     # Step the DFA forward
@@ -191,3 +203,5 @@ while True:
             q = base_exec.dfa_current_state(current_task)
             base_exec.dfa_next_state(current_task, q, info[agent]["word"])
             qprime = base_exec.dfa_current_state(current_task)
+
+save_frames_as_gif(frames)

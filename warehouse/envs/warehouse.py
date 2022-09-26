@@ -176,7 +176,7 @@ class Warehouse(gym.Env):
                     )
             else:
                 observations[agent] = self.states[agent]
-        self.renderer.render_step()
+        #self.renderer.render_step()
 
         return observations, rewards, dones, info
 
@@ -217,14 +217,17 @@ class Warehouse(gym.Env):
 
         # if an agent is carrying a rack draw this rack first
         for _, v in self.current_rack_positions.items():
-            pygame.draw.rect(
-                canvas,
-                (0, 0 ,255),
-                pygame.Rect(
-                    pix_square_size * np.array(v, dtype=np.int64) + 0.1 * pix_square_size,
-                    (pix_square_size - 0.2 * pix_square_size, pix_square_size - 0.2 * pix_square_size)
-                ),
-            )
+            try:
+                pygame.draw.rect(
+                    canvas,
+                    (0, 0 ,255),
+                    pygame.Rect(
+                        pix_square_size * np.array(v, dtype=np.int64) + 0.1 * pix_square_size,
+                        (pix_square_size - 0.2 * pix_square_size, pix_square_size - 0.2 * pix_square_size)
+                    ),
+                )
+            except:
+                continue
         for r in self.warehouse_api.racks:
             pygame.draw.rect(
                 canvas,

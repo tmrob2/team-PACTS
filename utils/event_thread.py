@@ -46,16 +46,12 @@ class EventThread(Thread):
         self.queue = queue
         self.task_counter = 0
         self.failure_queue = []
+        self.state = 0
 
         self.r = redis.Redis(host='localhost', port=6379, db=0)
         self.p = self.r.pubsub()
         self.p.subscribe('dfa-channel')
         self.p.subscribe('executor-channel') # need to listen for event failures
-
-        self.FRAMES_PER_SECOND = 20
-        self.milli_seconds_since_event = 0
-        self.milli_seconds_until_event = random.randint(500, 2000)
-        self.clock = pygame.time.Clock()
 
         # define the warehouse here for referencing attributes
         self.env: Warehouse = gym.make(
@@ -82,10 +78,8 @@ class EventThread(Thread):
                 self.continuous()
             elif val['event'] == "process failure":
                 self.process_failed_tasks()
-            elif val['event'] == 'stop task stream' or \
-                     val['event'] == 'tear down listener':
+            elif val['event'] == 'tear down listener':
                 self.send_poison_pill()
-                break
             # continuously send messages (tasks) to the dfa subscriber
 
     #
@@ -118,15 +112,6 @@ class EventThread(Thread):
     def send_poison_pill(self):
         d = {"event_type": "end_stream"}
         self.r.publish("dfa-channel", json.dumps(d))
-
-    def continuous(self):
-        milliseconds_since_event += self.clock.tick(self.FRAMES_PER_SECOND)
-
-        # handle input here
-
-        if milliseconds_since_event > milliseconds_until_event:
-            # perform your random event
-            print("\rsend a new continuous event")
-            milliseconds_until_event = random.randint(500, 2001)
-            milliseconds_since_event = 0
+        self.r.publish("executor-channel", json.dumps(d))
+        
                 
