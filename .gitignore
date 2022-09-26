@@ -5,3 +5,4 @@ warehouse/__pycache__
 warehouse/warehouse.egg-info/
 CXSparse/
 utils/__pycache__/event_thread.cpython-310.pyc
+utils/__pycache__/gym_to_gif.cpython-310.pyc
