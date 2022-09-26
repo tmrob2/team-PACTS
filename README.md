@@ -49,7 +49,13 @@
     <li><a href="#installation">Installation</a></li>
   </ul>
 </li>
-<li><a href="#usage">Usage</a></li>
+<li>
+  <a href="#usage">Usage</a>
+  <ul>
+    <li><a href="#smart-warehouse-motap-example">Smart warehouse MOTAP example</a></li>
+    <li><a href="#continuous-task-stream-example">Continuous task stream Example</a></li>
+  </ul>
+</li>
 <li><a href="#roadmap">Roadmap</a></li>
 <li><a href="#contributing">Contributing</a></li>
 <li><a href="#license">License</a></li>
@@ -112,7 +118,7 @@ pip install maturin
 
 ```
 
-### Project Setup
+### Installation
 
 #### Step 1. 
 Install the Sparse BLAS C libraries
@@ -409,7 +415,21 @@ while True:
 ```
 <p align="right">(<a href="#top">back to top</a>)</p>
 
+### Continuous Task Stream Example
 
+To see an example of the usage of a continuous task stream, there are three example implementations which need to run concurrently. In seperate terminals run:
+```sh
+python warehouse_event_handler.py
+```
+
+The interval is the number of batches to group together in a MOTAP model. 
+```sh
+python pipeline --interval=5 --eps=0.00001
+```
+
+```sh
+python executor.py
+```
 
 <!-- ROADMAP -->
 ## Roadmap
