@@ -117,6 +117,7 @@ Make sure that pip is installed and also best to have a virtual environment setu
 pip install maturin
 
 ```
+Also requires installation of CPLEX which can be downloaded and installed for free from IBM. See documentation for CPLEX studio. 
 
 ### Installation
 
