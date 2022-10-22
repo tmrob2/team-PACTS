@@ -52,6 +52,12 @@ impl DFA {
         }
     }
 
+    fn print_transitions(&self) {
+        for transition in self.transitions.iter() {
+            println!("{:?}", transition);
+        }
+    }
+
     fn add_transition(&mut self, q: i32, w: String, qprime: i32) {
         self.transitions.insert(format!("{}-{}", q, w), qprime);
     }
@@ -64,7 +70,7 @@ impl DFA {
 
     pub fn get_transition(&self, state: i32, word: &str) -> i32 {
         let qprime = *self.transitions.get(&format!("{}-{}", state, word))
-            .expect(&format!("Count no find transition: {}-{}", state, word));
+            .expect(&format!("Could not find transition: {}-{}", state, word));
         qprime
     }
 

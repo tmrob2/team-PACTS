@@ -215,21 +215,26 @@ where S: Copy + std::fmt::Debug + Eq + Hash, E: Env<S> {
                 &mut rewards, q, sidx, task, action as i32, nobjs, agent_id as usize, task_idx
             );
 
-            let v = mdp.step_(s, action as u8).unwrap();
-            if !v.is_empty() {
-                product_mdp.insert_action(action as i32);
-                product_mdp.insert_avail_act(&(s, q), action as i32);
-                for (sprime, p, w) in v.iter() { 
-
-                    let qprime: i32 = task.get_transition(q, w);
-                    if !visited.contains(&(*sprime, qprime)) {
-                        visited.insert((*sprime, qprime));
-                        stack.push_back((*sprime, qprime));
-                        product_mdp.insert_state((*sprime, qprime));
+            //let v = mdp.step_(s, action as u8).unwrap();
+            match mdp.step_(s, action as u8) {
+                Ok(v) => {
+                    if !v.is_empty() {
+                        product_mdp.insert_action(action as i32);
+                        product_mdp.insert_avail_act(&(s, q), action as i32);
+                        for (sprime, p, w) in v.iter() { 
+        
+                            let qprime: i32 = task.get_transition(q, w);
+                            if !visited.contains(&(*sprime, qprime)) {
+                                visited.insert((*sprime, qprime));
+                                stack.push_back((*sprime, qprime));
+                                product_mdp.insert_state((*sprime, qprime));
+                            }
+                            let sprime_idx = *product_mdp.state_map.get(&(*sprime, qprime)).unwrap();
+                            transitions.insert((action as i32, sidx, sprime_idx), *p);
+                        }
                     }
-                    let sprime_idx = *product_mdp.state_map.get(&(*sprime, qprime)).unwrap();
-                    transitions.insert((action as i32, sidx, sprime_idx), *p);
                 }
+                Err(_) => {}
             }
         }
     }

@@ -13,6 +13,7 @@ pub mod executor;
 
 use std::hash::Hash;
 use std::mem;
+use std::time::Instant;
 use agent::agent::Env;
 use executor::executor::{GenericSolutionFunctions, DefineSolution, Solution, Execution, DefineSerialisableExecutor};
 use pyo3::prelude::*;
@@ -21,7 +22,9 @@ use hashbrown::HashMap;
 use scpm::model::SCPM; // , MOProductMDP};
 use algorithm::synth::scheduler_synthesis;
 //test_scpm, warehouse_scheduler_synthesis
-use envs::warehouse::{Warehouse, test_prod, warehouse_scheduler_synthesis, Executor, SerialisableExecutor};
+use envs::warehouse::{Warehouse, warehouse_scheduler_synthesis, Executor, SerialisableExecutor};
+use envs::{warehouse, message};
+use envs::message::*;
 //use agent::agent::{MDP};
 use dfa::dfa::{DFA, Mission, json_deserialize_from_string};
 //use parallel::{threaded::process_mdps};
@@ -489,6 +492,55 @@ where S: Copy + std::fmt::Debug + Hash + Eq + Send + Sync + 'static,
     }
 }
 
+fn generic_scheduler_synthesis_without_execution<E, S>(
+    model: &mut SCPM,
+    env: &mut E, 
+    w: Vec<f64>, 
+    eps: f64, 
+    target: Vec<f64>,
+) -> Result<Vec<f64>, String>
+where S: Copy + std::fmt::Debug + Hash + Eq + Send + Sync + 'static, 
+    E: Env<S>, Solution<S>: DefineSolution<S> + GenericSolutionFunctions<S> {
+    println!("Constructing products");
+    let mut solution: Solution<S> = Solution::new_(model.tasks.size);
+    let prods = model.construct_products(env);
+    let t1 = Instant::now();
+    // todo input the "outputs" into the scheduler synthesis algorithm to capture data
+    let (
+        pis, 
+        alloc, 
+        t_new, 
+        l,
+        prods
+    ) = scheduler_synthesis(model, &w[..], &eps, &target[..], prods);
+    println!("alloc: \n{:.3?}", alloc);
+    // convert output schedulers to 
+    // we need to construct the randomised scheduler here, then the output from the randomised
+    // scheduler, which will already be from a python script, will be the output of this function
+    let weights = random_sched(
+        alloc, t_new.to_vec(), l, model.tasks.size, model.num_agents
+    );
+    println!("Time: {:?}", t1.elapsed().as_secs_f32());
+    // Assign the ownership of the product models into the outputs at this point
+    for prod in prods.into_iter() {
+            solution.set_prod_state_maps(prod.state_map, prod.agent_id, prod.task_id);
+    }
+    match weights {
+        Some(w) => {
+            solution.set_schedulers(pis);
+            solution.set_weights(w, l);
+            solution.add_to_agent_task_queues();
+            return Ok(t_new) 
+        }
+        None => { 
+            return Err(format!(
+                "Randomised scheduler weights could not be found for target vector: {:?}", 
+                t_new
+            ))
+        }
+    }
+}
+
 /// A Python module implemented in Rust.
 #[pymodule]
 fn ce(_py: Python, m: &PyModule) -> PyResult<()> {
@@ -500,12 +552,15 @@ fn ce(_py: Python, m: &PyModule) -> PyResult<()> {
     //m.add_class::<Team>()?;
     m.add_class::<SCPM>()?;
     m.add_class::<Warehouse>()?;
+    m.add_class::<MessageSender>()?;
     m.add_class::<Executor>()?;
     m.add_class::<SerialisableExecutor>()?;
     //m.add_function(wrap_pyfunction!(build_model, m)?)?;
     //m.add_function(wrap_pyfunction!(value_iteration_test, m)?)?;
-    m.add_function(wrap_pyfunction!(test_prod, m)?)?;
+    m.add_function(wrap_pyfunction!(message::test_prod, m)?)?;
+    m.add_function(wrap_pyfunction!(warehouse::test_prod, m)?)?;
     m.add_function(wrap_pyfunction!(warehouse_scheduler_synthesis, m)?)?;
+    m.add_function(wrap_pyfunction!(message::msg_scheduler_synthesis, m)?)?;
     m.add_function(wrap_pyfunction!(json_deserialize_from_string, m)?)?;
     //m.add_function(wrap_pyfunction!(process_scpm, m)?)?;
     //m.add_function(wrap_pyfunction!(test_scpm, m)?)?;

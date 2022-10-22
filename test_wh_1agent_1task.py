@@ -197,9 +197,7 @@ eps = 0.00001
 #
 #
 #
-pi = ce.construct_prod_test(
-    scpm, env.warehouse_api, w, eps
-)
+pi = ce.construct_prod_test(scpm, env.warehouse_api, w, eps)
 ## ------------------------------------------------------------------------------
 ## Execution: Construct a DFA transition function and build the Mission from this
 ## ------------------------------------------------------------------------------
