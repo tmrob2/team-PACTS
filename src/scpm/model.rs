@@ -266,6 +266,105 @@ where S: Copy + std::fmt::Debug + Eq + Hash, E: Env<S> {
 }
 
 
+fn product_mdp_bfs_gpu<S, E>(
+    initial_state: &(S, i32),
+    //agent_fpath: &str,
+    //mdp: &Agent,
+    //mdp_rewards: &HashMap<(i32, i32), f64>,
+    mdp: &E, // MDP could be a trait
+    //mdp_available_actions: &HashMap<i32, Vec<i32>>,
+    task: &DFA,
+    agent_id: i32, 
+    task_id: i32,
+    nagents: usize,
+    nobjs: usize,
+    actions: &[i32]
+) -> MOProductMDP<S>
+where S: Copy + std::fmt::Debug + Eq + Hash, E: Env<S> {
+    let mut visited: HashSet<(S, i32)> = HashSet::new();
+    let mut transitions: HashMap<(i32, usize, usize), f32> = HashMap::new();
+    let mut rewards: HashMap<(i32, usize), Vec<f64>> = HashMap::new();
+    let mut stack: VecDeque<(S, i32)> = VecDeque::new();
+    
+    // get the actions from the env
+    
+    let mut product_mdp: MOProductMDP<S> = MOProductMDP::new(
+        *initial_state, &actions[..], agent_id, task_id
+    );
+
+    // input the initial state into the back of the stack
+    stack.push_back(*initial_state);
+    visited.insert(*initial_state);
+    product_mdp.insert_state(*initial_state);
+
+
+    while !stack.is_empty(){
+        // pop the front of the stack
+        let (s, q) = stack.pop_front().unwrap();
+        let sidx = *product_mdp.state_map.get(&(s, q)).unwrap();
+        // for the new state
+        // 1. has the new state already been visited
+        // 2. If the new stat has not been visited then insert 
+        // its successors into the stack
+        for action in 0..actions.len() {
+            // insert the mdp rewards
+            let task_idx: usize = nagents + task_id as usize;
+            process_mo_reward(
+                &mut rewards, q, sidx, task, action as i32, nobjs, agent_id as usize, task_idx
+            );
+
+            //let v = mdp.step_(s, action as u8).unwrap();
+            match mdp.step_(s, action as u8) {
+                Ok(v) => {
+                    if !v.is_empty() {
+                        product_mdp.insert_action(action as i32);
+                        product_mdp.insert_avail_act(&(s, q), action as i32);
+                        for (sprime, p, w) in v.iter() { 
+        
+                            let qprime: i32 = task.get_transition(q, w);
+                            if !visited.contains(&(*sprime, qprime)) {
+                                visited.insert((*sprime, qprime));
+                                stack.push_back((*sprime, qprime));
+                                product_mdp.insert_state((*sprime, qprime));
+                            }
+                            let sprime_idx = *product_mdp.state_map.get(&(*sprime, qprime)).unwrap();
+                            transitions.insert((action as i32, sidx, sprime_idx), *p as f32);
+                        }
+                    }
+                }
+                Err(_) => {}
+            }
+        }
+    }
+    // once the BFS is finished then we can convert the HashMaps transitions and rewards into
+    // there corresponding matrices
+    for ((action, sidx, sprime_idx), p) in transitions.drain() {
+        product_mdp.insert_transition(sidx, action, sprime_idx, p);
+    }
+   
+    for action in product_mdp.actions.iter() {
+        let size = product_mdp.states.len() as i32;
+        // TODO use the Cxx f32 triple structure
+        let P: &mut Triple = product_mdp.transition_mat.get_mut(action).unwrap();
+        P.nc = size;
+        P.nr = size;
+        P.nzmax = P.x.len() as i32;
+        P.nz = P.x.len() as i32;
+        let R: &mut DenseMatrix = product_mdp.rewards_mat.get_mut(action).unwrap();
+        R.m = vec![-f32::MAX as f64; size as usize * nobjs];
+        R.cols = nobjs;
+        R.rows = size as usize;
+    }
+    // the next three lines of code must come after sizing of the matrices above because we
+    // need to initialise the dense matrix to -inf before we can start inserting values into it
+    for ((action, sidx), r) in rewards.drain() {
+        product_mdp.insert_reward(sidx, action, r, nobjs, product_mdp.states.len());
+    }
+    product_mdp.reverse_state_map = reverse_key_value_pairs(&product_mdp.state_map);
+    product_mdp
+}
+
+
 #[pyclass]
 /// SCPM is an unusual object
 /// 

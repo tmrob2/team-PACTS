@@ -83,6 +83,85 @@ pub struct Triple {
     pub nz: i32,
 }
 
+pub enum SpType {
+    Triple, 
+    CSR
+}
+
+pub struct CxxMatrixf32 {
+    pub nzmax: i32,
+    pub m: i32,
+    pub n: i32,
+    pub p: Vec<i32>,
+    pub i: Vec<i32>,
+    pub x: Vec<f32>,
+    pub nz: i32,
+    pub sptype: SpType
+}
+
+impl CxxMatrixf32 {
+    pub fn make(nzmax: i32, m: i32, n: i32, nz: i32, sptype: SpType) -> Self {
+        // makes a new triple
+        CxxMatrixf32 { 
+            nzmax, 
+            m, 
+            n, 
+            p: Vec::new(), 
+            i: Vec::new(), 
+            x: Vec::new(), 
+            nz, 
+            sptype
+        }
+    }
+
+    pub fn triple_entry(&mut self, i: i32, j: i32, val: f32) {
+        if self.nz < self.nzmax { 
+            self.i.push(i);
+            self.p.push(j);
+            self.x.push(val);
+            self.nz += 1;
+        } else {
+            println!("entry greater than max entries.");
+        }
+    }
+
+    pub fn free(&mut self) {
+        self.p = Vec::new();
+        self.i = Vec::new();
+        self.x = Vec::new();
+    }
+
+    pub fn csr_compress(&self) -> Self {
+        // make a new CS matrix in the CSR format
+        let nz = self.nz;
+        let mut csr_val: Vec<f32> = vec![0.; self.nz as usize];
+        let mut csr_j: Vec<i32> = vec![0; self.nz as usize];
+        let mut csr_i: Vec<i32> = vec![0; self.m as usize + 1];
+        let nzmax = self.nzmax;
+        let m = self.m;
+        let n = self.n;
+        for k in 0..nz as usize {
+            csr_val[k] = self.x[k];
+            csr_j[k] = self.p[k];
+            csr_i[(self.i[k]) as usize + 1] += 1;
+        }
+        for r in 0..self.m as usize {
+            csr_i[r + 1] += csr_i[r];
+        }
+        
+        CxxMatrixf32 { 
+            nzmax, 
+            m, 
+            n, 
+            p: csr_j, 
+            i: csr_i, 
+            x: csr_val, 
+            nz, 
+            sptype: SpType::CSR 
+        }
+    }
+}
+
 impl Triple {
     pub fn new() -> Self {
         Triple {
