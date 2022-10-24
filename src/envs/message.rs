@@ -3,8 +3,10 @@ use pyo3::prelude::*;
 use hashbrown::HashMap;
 use crate::agent::agent::Env;
 use crate::generic_scheduler_synthesis_without_execution;
+use crate::gpu_scpm::gpu_model;
+use crate::test_one_w_gpu_problem;
 use crate::scpm::model::{SCPM, build_model};
-use crate::algorithm::dp::value_iteration;
+use crate::algorithm::dp::{value_iteration, random_policy};
 use std::time::Instant;
 
 type State = i32;
@@ -14,6 +16,7 @@ type State = i32;
 pub struct MessageSender {
     pub states: Vec<i32>,
     pub initial_state: i32,
+    pub action_space: Vec<i32>
 }
 
 #[pymethods]
@@ -22,7 +25,8 @@ impl MessageSender {
     fn new() -> Self {
         MessageSender {
             states: (0..5).collect(),
-            initial_state: 0
+            initial_state: 0,
+            action_space: (0..2).collect()
         }
     }
 }
@@ -78,6 +82,10 @@ impl Env<State> for MessageSender {
     }
 
     fn set_task(&mut self, _task_id: usize) {
+    }
+
+    fn get_action_space(&self) -> Vec<i32> {
+        self.action_space.to_vec()
     }
 }
 
@@ -135,4 +143,21 @@ pub fn msg_scheduler_synthesis(
         Ok(r) => { Ok(r) }
         Err(e) => Err(PyValueError::new_err(e))
     }
+}
+
+#[pyfunction]
+pub fn test_gpu_matrix(
+    model: &mut gpu_model::GPUSCPM,
+    env: &mut MessageSender,
+    w: Vec<f64>,
+    eps: f64
+) -> (i32, i32, i32, Vec<i32>, Vec<i32>, Vec<f32>, Vec<i32>, Vec<i32>, Vec<f32>, usize, usize) {
+    let (mat, pi, r) = 
+        test_one_w_gpu_problem(model, env, w, eps);
+
+    let csr = mat.csr_compress();
+
+    // generate a random policy
+
+    (mat.nz, mat.m, mat.n, mat.i, mat.p, mat.x, csr.i, pi, r.m, r.rows, r.cols)
 }

@@ -2,7 +2,7 @@
 
 use hashbrown::{HashMap, HashSet};
 use pyo3::prelude::*;
-use crate::agent::agent::{Env};
+use crate::agent::agent::Env;
 use crate::dfa::dfa::{DFA, Mission};
 use std::collections::VecDeque;
 use crate::*;
@@ -12,10 +12,10 @@ pub struct MOProductMDP<S> {
     pub initial_state: (S, i32),
     pub states: Vec<(S, i32)>,
     pub actions: Vec<i32>,
-    //pub rewards: HashMap<((i32, i32), i32), Vec<f64>>,
-    //pub transitions: HashMap<((i32, i32), i32), Vec<((i32, i32), f64)>>,
-    pub transition_mat: HashMap<i32, Triple>,
-    pub rewards_mat: HashMap<i32, DenseMatrix>,
+    //pub rewards: HashMap<((i32, i32), i32), Vec<f32>>,
+    //pub transitions: HashMap<((i32, i32), i32), Vec<((i32, i32), f32)>>,
+    pub transition_mat: HashMap<i32, CxxMatrixf32>,
+    pub rewards_mat: HashMap<i32, DenseMatrixf32>,
     pub agent_id: i32,
     pub task_id: i32,
     action_map: HashMap<(S, i32), Vec<i32>>,
@@ -25,11 +25,11 @@ pub struct MOProductMDP<S> {
 
 impl<S> MOProductMDP<S> where S: Copy + Eq + Hash {
     pub fn new(initial_state: (S, i32), actions: &[i32], agent_id: i32, task_id: i32) -> Self {
-        let mut transitions: HashMap<i32, Triple> = HashMap::new();
-        let mut rewards: HashMap<i32, DenseMatrix> = HashMap::new();
+        let mut transitions: HashMap<i32, CxxMatrixf32> = HashMap::new();
+        let mut rewards: HashMap<i32, DenseMatrixf32> = HashMap::new();
         for action in actions.iter() {
-            transitions.insert(*action, Triple::new());
-            rewards.insert(*action, DenseMatrix::new(0,0));
+            transitions.insert(*action, CxxMatrixf32::new());
+            rewards.insert(*action, DenseMatrixf32::new(0,0));
         }
         
         MOProductMDP {
@@ -87,11 +87,11 @@ impl<S> MOProductMDP<S> where S: Copy + Eq + Hash {
         }
     }
 
-    fn insert_transition(&mut self, state: usize, action: i32, sprime: usize, p: f64) {
-        let P: &mut Triple = self.transition_mat.get_mut(&action).unwrap();
+    fn insert_transition(&mut self, state: usize, action: i32, sprime: usize, p: f32) {
+        let P: &mut CxxMatrixf32 = self.transition_mat.get_mut(&action).unwrap();
         // we know that this doesn't exist because we have guarded against it
         P.i.push(state as i32);
-        P.j.push(sprime as i32);
+        P.p.push(sprime as i32);
         P.x.push(p);
     }
 
@@ -99,11 +99,11 @@ impl<S> MOProductMDP<S> where S: Copy + Eq + Hash {
         &mut self, 
         sidx: usize, 
         action: i32, 
-        rewards: Vec<f64>,
+        rewards: Vec<f32>,
         nobjs: usize,
         size: usize
     ) {
-        let R: &mut DenseMatrix = self.rewards_mat.get_mut(&action).unwrap();
+        let R: &mut DenseMatrixf32 = self.rewards_mat.get_mut(&action).unwrap();
         for c in 0..nobjs {
             R.m[c * size + sidx] = rewards[c];
         }
@@ -111,7 +111,7 @@ impl<S> MOProductMDP<S> where S: Copy + Eq + Hash {
 }
 
 fn process_mo_reward(
-    rewards_map: &mut HashMap<(i32, usize), Vec<f64>>,
+    rewards_map: &mut HashMap<(i32, usize), Vec<f32>>,
     q: i32,
     sidx: usize,
     task: &DFA,
@@ -141,8 +141,8 @@ fn process_mo_reward(
 pub fn build_model<S, E>(
     initial_state: (S, i32),
     //agent: &Agent,
-    //mdp_rewards: &HashMap<(i32, i32), f64>,
-    //transitions: &HashMap<(i32, u8), Vec<(i32, f64, String)>>,
+    //mdp_rewards: &HashMap<(i32, i32), f32>,
+    //transitions: &HashMap<(i32, u8), Vec<(i32, f32, String)>>,
     mdp: &mut E, // where E is a generic environment
     task: &DFA,
     agent_id: i32,
@@ -172,7 +172,7 @@ fn product_mdp_bfs<S, E>(
     initial_state: &(S, i32),
     //agent_fpath: &str,
     //mdp: &Agent,
-    //mdp_rewards: &HashMap<(i32, i32), f64>,
+    //mdp_rewards: &HashMap<(i32, i32), f32>,
     mdp: &E, // MDP could be a trait
     //mdp_available_actions: &HashMap<i32, Vec<i32>>,
     task: &DFA,
@@ -184,8 +184,8 @@ fn product_mdp_bfs<S, E>(
 ) -> MOProductMDP<S>
 where S: Copy + std::fmt::Debug + Eq + Hash, E: Env<S> {
     let mut visited: HashSet<(S, i32)> = HashSet::new();
-    let mut transitions: HashMap<(i32, usize, usize), f64> = HashMap::new();
-    let mut rewards: HashMap<(i32, usize), Vec<f64>> = HashMap::new();
+    let mut transitions: HashMap<(i32, usize, usize), f32> = HashMap::new();
+    let mut rewards: HashMap<(i32, usize), Vec<f32>> = HashMap::new();
     let mut stack: VecDeque<(S, i32)> = VecDeque::new();
     
     // get the actions from the env
@@ -230,7 +230,7 @@ where S: Copy + std::fmt::Debug + Eq + Hash, E: Env<S> {
                                 product_mdp.insert_state((*sprime, qprime));
                             }
                             let sprime_idx = *product_mdp.state_map.get(&(*sprime, qprime)).unwrap();
-                            transitions.insert((action as i32, sidx, sprime_idx), *p);
+                            transitions.insert((action as i32, sidx, sprime_idx), *p as f32);
                         }
                     }
                 }
@@ -246,13 +246,13 @@ where S: Copy + std::fmt::Debug + Eq + Hash, E: Env<S> {
    
     for action in product_mdp.actions.iter() {
         let size = product_mdp.states.len() as i32;
-        let P: &mut Triple = product_mdp.transition_mat.get_mut(action).unwrap();
-        P.nc = size;
-        P.nr = size;
+        let P: &mut CxxMatrixf32 = product_mdp.transition_mat.get_mut(action).unwrap();
+        P.m = size;
+        P.n = size;
         P.nzmax = P.x.len() as i32;
         P.nz = P.x.len() as i32;
-        let R: &mut DenseMatrix = product_mdp.rewards_mat.get_mut(action).unwrap();
-        R.m = vec![-f32::MAX as f64; size as usize * nobjs];
+        let R: &mut DenseMatrixf32 = product_mdp.rewards_mat.get_mut(action).unwrap();
+        R.m = vec![-f32::MAX; size as usize * nobjs];
         R.cols = nobjs;
         R.rows = size as usize;
     }
@@ -271,7 +271,7 @@ where S: Copy + std::fmt::Debug + Eq + Hash, E: Env<S> {
 /// 
 /// For now we will just include the team of agents and a mission
 /// because we just want to look out how the channel works
-pub struct SCPM {
+pub struct GPUSCPM {
     pub num_agents: usize,
     //pub agents: Team,
     pub tasks: Mission, 
@@ -281,11 +281,11 @@ pub struct SCPM {
 }
 
 #[pymethods]
-impl SCPM{ 
+impl GPUSCPM{ 
     #[new]
     fn new(mission: Mission, num_agents: usize, actions: Vec<i32>) -> Self {
         //let num_tasks = mission.size;
-        SCPM {
+        GPUSCPM {
             num_agents,
             tasks: mission,
             actions
@@ -296,10 +296,10 @@ impl SCPM{
     // todo construct products should take a file reference to the environment that we wish to construct
 }
 
-impl SCPM {
+impl GPUSCPM {
     pub fn construct_products<S, E>(
         &self, 
-        mdp: &mut E,
+        mdp: &mut E
     ) -> Vec<MOProductMDP<S>>
     where S: Copy + std::fmt::Debug + Hash + Eq, E: Env<S> {
 

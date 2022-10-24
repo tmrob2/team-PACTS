@@ -175,7 +175,7 @@ where S: Copy + Hash + Eq {
     (pi, r)
 }
 
-fn random_policy<S>(prod: &MOProductMDP<S>) -> Vec<f64>
+pub fn random_policy<S>(prod: &MOProductMDP<S>) -> Vec<f64>
 where S: Copy + Hash + Eq {
     let mut pi: Vec<f64> = vec![0.; prod.states.len()];
     for state in prod.states.iter() {

@@ -716,6 +716,10 @@ impl Env<State> for Warehouse {
     fn set_task(&mut self, task_id: usize) {
         self.current_task = Some(task_id);
     }
+
+    fn get_action_space(&self) -> Vec<i32> {
+        todo!()
+    }
 }
 
 #[pyfunction]

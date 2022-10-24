@@ -7,6 +7,8 @@ pub trait Env<S> {
     fn get_init_state(&self, agent: usize) -> S;
 
     fn set_task(&mut self, task_id: usize);
+
+    fn get_action_space(&self) -> Vec<i32>;
 }
 
 // This is the code we already have for an MDP so we have to make this work
