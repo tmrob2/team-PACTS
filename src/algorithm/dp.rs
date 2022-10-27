@@ -189,7 +189,7 @@ where S: Copy + Hash + Eq {
 }
 
 #[allow(non_camel_case_types, non_snake_case)]
-fn construct_argmax_spmatrix<S>(
+pub fn construct_argmax_spmatrix<S>(
     prod: &MOProductMDP<S>, 
     pi: &[f64], 
     matrices: &HashMap<i32, SparseMatrix>,
@@ -245,7 +245,7 @@ fn construct_argmax_spmatrix<S>(
     }
 }
 
-fn construct_argmax_Rmatrix<S>(
+pub fn construct_argmax_Rmatrix<S>(
     prod: &MOProductMDP<S>, 
     pi: &[f64], 
     nobjs: usize
@@ -265,7 +265,7 @@ fn construct_argmax_Rmatrix<S>(
     }
 }
 
-fn construct_argmax_Rvector<S>(prod: &MOProductMDP<S>, pi: &[f64]) -> Vec<f64> {
+pub fn construct_argmax_Rvector<S>(prod: &MOProductMDP<S>, pi: &[f64]) -> Vec<f64> {
     let size = prod.states.len();
     let agent_idx = prod.agent_id as usize;
     let mut R: Vec<f64> = vec![0.; size];
@@ -276,7 +276,7 @@ fn construct_argmax_Rvector<S>(prod: &MOProductMDP<S>, pi: &[f64]) -> Vec<f64> {
     R
 }
 
-fn value_for_init_policy(
+pub fn value_for_init_policy(
     R: &[f64], 
     x: &mut [f64], 
     eps: &f64, 

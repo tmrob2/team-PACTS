@@ -211,18 +211,19 @@ where S: Copy + std::fmt::Debug + Eq + Hash, E: Env<S> {
         for action in 0..actions.len() {
             // insert the mdp rewards
             let task_idx: usize = nagents + task_id as usize;
-            process_mo_reward(
-                &mut rewards, q, sidx, task, action as i32, nobjs, agent_id as usize, task_idx
-            );
-
+            
             //let v = mdp.step_(s, action as u8).unwrap();
+            process_mo_reward(
+                &mut rewards, q, sidx, task, action as i32,
+                nobjs, agent_id as usize, task_idx
+            );
             match mdp.step_(s, action as u8) {
                 Ok(v) => {
                     if !v.is_empty() {
                         product_mdp.insert_action(action as i32);
                         product_mdp.insert_avail_act(&(s, q), action as i32);
                         for (sprime, p, w) in v.iter() { 
-        
+                            
                             let qprime: i32 = task.get_transition(q, w);
                             if !visited.contains(&(*sprime, qprime)) {
                                 visited.insert((*sprime, qprime));
@@ -246,22 +247,30 @@ where S: Copy + std::fmt::Debug + Eq + Hash, E: Env<S> {
    
     for action in product_mdp.actions.iter() {
         let size = product_mdp.states.len() as i32;
-        let P: &mut CxxMatrixf32 = product_mdp.transition_mat.get_mut(action).unwrap();
+        let P: &mut CxxMatrixf32 = 
+            product_mdp.transition_mat.get_mut(action).unwrap();
         P.m = size;
         P.n = size;
         P.nzmax = P.x.len() as i32;
         P.nz = P.x.len() as i32;
-        let R: &mut DenseMatrixf32 = product_mdp.rewards_mat.get_mut(action).unwrap();
+        let R: &mut DenseMatrixf32 = 
+            product_mdp.rewards_mat.get_mut(action).unwrap();
         R.m = vec![-f32::MAX; size as usize * nobjs];
         R.cols = nobjs;
         R.rows = size as usize;
     }
     // the next three lines of code must come after sizing of the matrices above because we
     // need to initialise the dense matrix to -inf before we can start inserting values into it
-    for ((action, sidx), r) in rewards.drain() {
-        product_mdp.insert_reward(sidx, action, r, nobjs, product_mdp.states.len());
-    }
     product_mdp.reverse_state_map = reverse_key_value_pairs(&product_mdp.state_map);
+    for ((action, sidx), r) in rewards.drain() {
+        // is the action available at state sidx?
+        let (s, _) = product_mdp.reverse_state_map.get(&sidx).unwrap();    
+        if mdp.step_(*s, action as u8).is_ok() {
+            product_mdp.insert_reward(
+                sidx, action, r, nobjs, product_mdp.states.len()
+            );
+        }
+    }
     product_mdp
 }
 
@@ -277,10 +286,14 @@ pub struct GPUSCPM {
     pub tasks: Mission, 
     // todo: I don't think that we actually require a mission any more, because we will not be storing any data here
     // all of the transition information should be stored in the mdp environment script which will be called via GIL 
-    pub actions: Vec<i32>
+    pub actions: Vec<i32>,
+    #[pyo3(get)]
+    pub state_spaces: HashMap<i32, i32>,
 }
 
 #[pymethods]
+/// The GPU model has a little extra machinery to handle the construction
+/// of the large sparse transition and rewards matrices.
 impl GPUSCPM{ 
     #[new]
     fn new(mission: Mission, num_agents: usize, actions: Vec<i32>) -> Self {
@@ -288,7 +301,8 @@ impl GPUSCPM{
         GPUSCPM {
             num_agents,
             tasks: mission,
-            actions
+            actions,
+            state_spaces: HashMap::new(),
         }
     }
 
@@ -298,7 +312,7 @@ impl GPUSCPM{
 
 impl GPUSCPM {
     pub fn construct_products<S, E>(
-        &self, 
+        &mut self, 
         mdp: &mut E
     ) -> Vec<MOProductMDP<S>>
     where S: Copy + std::fmt::Debug + Hash + Eq, E: Env<S> {
@@ -309,6 +323,7 @@ impl GPUSCPM {
         //let initial_state: (i32, i32) = (0, 0);
         let nobjs = self.num_agents + self.tasks.size;
         let nagents = self.num_agents;
+        let mut pmodel_cntr = 0;
         //for (i, agent) in self.agents.agents.iter().enumerate() {
         for i in 0..self.num_agents {
             //let mdp_rewards = agent.convert_rewards_to_map();
@@ -316,7 +331,7 @@ impl GPUSCPM {
             //let mdp_available_actions = agent.available_actions_to_map();
             for (j, task) in self.tasks.tasks.iter().enumerate() {
                 mdp.set_task(j);
-                output.push(build_model(
+                let pmdp_model = build_model(
                     (mdp.get_init_state(i), 0), 
                     //agent, 
                     //&mdp_rewards,
@@ -328,7 +343,10 @@ impl GPUSCPM {
                     nagents, 
                     nobjs,
                     &self.actions
-                ));
+                );
+                self.state_spaces.insert(pmodel_cntr, pmdp_model.states.len() as i32);
+                output.push(pmdp_model);
+                pmodel_cntr += 1;
             }
         }
         output

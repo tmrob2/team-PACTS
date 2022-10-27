@@ -11,19 +11,23 @@ pub mod lp;
 pub mod envs;
 pub mod executor;
 pub mod gpu_scpm;
+pub mod sparse;
 
 use std::hash::Hash;
 use std::mem;
 use std::time::Instant;
 use agent::agent::Env;
-use executor::executor::{GenericSolutionFunctions, DefineSolution, Solution, Execution, DefineSerialisableExecutor};
+use executor::executor::{GenericSolutionFunctions, DefineSolution, 
+    Solution, Execution, DefineSerialisableExecutor};
 use pyo3::prelude::*;
 //use pyo3::exceptions::PyValueError;
 use hashbrown::HashMap;
+use rand_chacha::rand_core::block;
 use scpm::model::SCPM; // , MOProductMDP};
 use algorithm::synth::scheduler_synthesis;
 //test_scpm, warehouse_scheduler_synthesis
-use envs::warehouse::{Warehouse, warehouse_scheduler_synthesis, Executor, SerialisableExecutor};
+use envs::warehouse::{Warehouse, warehouse_scheduler_synthesis, 
+    Executor, SerialisableExecutor};
 use envs::{warehouse, message};
 use envs::message::*;
 use gpu_scpm::gpu_model::{self, GPUSCPM};
@@ -37,6 +41,8 @@ use cblas_sys::{cblas_dcopy, cblas_dgemv, cblas_dscal, cblas_ddot};
 //use algorithm::dp::value_iteration;
 use float_eq::float_eq;
 use std::fs;
+use sparse::definition::{CxxMatrixf32, CSparsef32};
+use sparse::compress::compress;
 
 use crate::gpu_scpm::gpu_dp_utils::random_policy;
 
@@ -55,64 +61,108 @@ pub fn gather_policy_ffi(pi: &[i32], output: &mut [i32], nc: i32, nr: i32, prod_
     }
 }
 
-#[link(name="cudatest", kind="static")]
 extern "C" {
-    fn test_thrust_gather(output: *mut i32);
+    fn test_csr_create(m: i32, n: i32, nnz: i32, i: *const i32, j: *const i32, x: *const f32);
 }
 
-#[pyfunction]
-pub fn test_thrust_gather_ffi(mut output: Vec<i32>) {
+pub fn test_csr_create_ffi(m: i32, n: i32, nnz: i32, i: &[i32], j: &[i32], x: &[f32]) {
     unsafe {
-        test_thrust_gather(output.as_mut_ptr());
+        test_csr_create(m, n, nnz,i.as_ptr(), j.as_ptr(), x.as_ptr());
     }
 }
 
 extern "C" {
     fn test_initial_policy_value(
-        policy: *const i32,
-        max_state_space: i32,
-        block_size: i32,
-        total_rows: i32,
         value: *mut f32,
-        trans_output: *mut i32,
-        reward_output: *mut i32,
-        trans_i: *const i32,
-        trans_j: *const i32,
-        trans_x: *const f32,
-        nnz: i32, 
-        rewards: *const f32,
-        num_objectives: i32
+        pm: i32,
+        pn: i32,
+        pnz: i32,
+        pi: *const i32,
+        pj: *const i32,
+        px: *const f32,
+        rm: i32,
+        rn: i32,
+        rnz: i32,
+        ri: *const i32,
+        rj: *const i32,
+        rx: *const f32,
+        x: *mut f32,
+        y: *mut f32,
+        w: *const f32,
+        rmv: *mut f32
     );
 }
 
+// TODO this needs the library linking 
 pub fn test_initial_policy_value_ffi(
-    policy: &[i32],
-    max_state_space: i32,
-    block_size: i32,
-    total_rows: i32,
     value: &mut [f32],
-    trans_output: &mut [i32],
-    reward_output: &mut [i32],
-    m: &CxxMatrixf32,
-    rewards: &[f32],
-    num_objectives: i32
+    P: &CxxMatrixf32,
+    R: &CxxMatrixf32,
+    x: &mut [f32],
+    y: &mut [f32],
+    w: &[f32],
+    rmv: &mut [f32]
 ) {
     unsafe {
         test_initial_policy_value(
-            policy.as_ptr(), 
-            max_state_space, 
-            block_size, 
-            total_rows, 
-            value.as_mut_ptr(), 
-            trans_output.as_mut_ptr(), 
-            reward_output.as_mut_ptr(), 
-            m.i.as_ptr(),
-            m.p.as_ptr(),
-            m.x.as_ptr(), 
-            m.nz,
-            rewards.as_ptr(), 
-            num_objectives
+            value.as_mut_ptr(),
+            P.m,
+            P.n,
+            P.nz,
+            P.i.as_ptr(),
+            P.p.as_ptr(),
+            P.x.as_ptr(),
+            R.m, 
+            R.n, 
+            R.nz,
+            R.i.as_ptr(),
+            R.p.as_ptr(),
+            R.x.as_ptr(),
+            x.as_mut_ptr(),
+            y.as_mut_ptr(),
+            w.as_ptr(),
+            rmv.as_mut_ptr()
         );
+    }
+}
+
+#[link(name="cudatest", kind="static")]
+extern "C" {
+    fn test_csr_spmv(
+        csr_row: *const i32, 
+        csr_col: *const i32, 
+        csr_vals: *const f32,
+        x: *const f32,
+        y: *mut f32,
+        nnz: i32, 
+        sizeof_row: i32, 
+        m: i32,
+        n: i32
+    );
+}
+
+pub fn test_csr_spmv_ffi(
+    row: &[i32],
+    col: &[i32],
+    vals: &[f32],
+    x: &[f32],
+    y: &mut [f32],
+    nnz: i32,
+    m: i32,
+    n: i32,
+) {
+    unsafe {
+        test_csr_spmv(
+            row.as_ptr(), 
+            col.as_ptr(), 
+            vals.as_ptr(), 
+            x.as_ptr(), 
+            y.as_mut_ptr(),
+            nnz, 
+            row.len() as i32,
+            m, 
+            n
+        )
     }
 }
 
@@ -187,90 +237,6 @@ pub enum SpType {
     CSR
 }
 
-#[repr(C)]
-pub struct CxxMatrixf32 {
-    pub nzmax: i32,
-    pub m: i32,
-    pub n: i32,
-    pub p: Vec<i32>,
-    pub i: Vec<i32>,
-    pub x: Vec<f32>,
-    pub nz: i32,
-}
-
-impl CxxMatrixf32 {
-    pub fn make(nzmax: i32, m: i32, n: i32, nz: i32) -> Self {
-        // makes a new triple
-        CxxMatrixf32 { 
-            nzmax, 
-            m, 
-            n, 
-            p: Vec::new(), 
-            i: Vec::new(), 
-            x: Vec::new(), 
-            nz
-        }
-    }
-
-    pub fn new() -> Self {
-        CxxMatrixf32 { 
-            nzmax: 0, 
-            m: 0, 
-            n: 0, 
-            p: Vec::new(), 
-            i: Vec::new(), 
-            x: Vec::new(), 
-            nz: 0
-        }
-    }
-
-    pub fn triple_entry(&mut self, i: i32, j: i32, val: f32) {
-        if self.nz < self.nzmax { 
-            self.i.push(i);
-            self.p.push(j);
-            self.x.push(val);
-            self.nz += 1;
-        } else {
-            println!("entry greater than max entries.");
-        }
-    }
-
-    pub fn free(&mut self) {
-        self.p = Vec::new();
-        self.i = Vec::new();
-        self.x = Vec::new();
-    }
-
-    pub fn csr_compress(&self) -> Self {
-        // make a new CS matrix in the CSR format
-        let nz = self.nz;
-        let mut csr_val: Vec<f32> = vec![0.; self.nz as usize];
-        let mut csr_j: Vec<i32> = vec![0; self.nz as usize];
-        let mut csr_i: Vec<i32> = vec![0; self.m as usize + 1];
-        let nzmax = self.nzmax;
-        let m = self.m;
-        let n = self.n;
-        for k in 0..nz as usize {
-            csr_val[k] = self.x[k];
-            csr_j[k] = self.p[k];
-            csr_i[(self.i[k]) as usize + 1] += 1;
-        }
-        for r in 0..self.m as usize {
-            csr_i[r + 1] += csr_i[r];
-        }
-        
-        CxxMatrixf32 { 
-            nzmax, 
-            m, 
-            n, 
-            p: csr_j, 
-            i: csr_i, 
-            x: csr_val, 
-            nz,
-        }
-    }
-}
-
 impl Triple {
     pub fn new() -> Self {
         Triple {
@@ -283,6 +249,16 @@ impl Triple {
             nz: 0
         }
     }
+}
+
+#[pyclass]
+pub struct GPUProblemMetaData {
+    #[pyo3(get)]
+    pub max_size: usize,
+    #[pyo3(get)]
+    pub transition_prod_block_size: usize,
+    #[pyo3(get)]
+    pub reward_obj_prod_block_size: usize
 }
 
 #[derive(Debug)]
@@ -534,6 +510,10 @@ pub fn val_or_zero_one(val: &f64) -> f64 {
         *val
     }
 }
+
+pub fn double_vec(v: Vec<i32>) -> Vec<i32> {
+    [&v[..], &v[..]].concat()
+}
 //--------------------------------------
 // Python mdp env wrapper 
 //--------------------------------------
@@ -729,13 +709,13 @@ where S: Copy + std::fmt::Debug + Hash + Eq + Send + Sync + 'static,
     }
 }
 
-fn test_one_w_gpu_problem<S, E>
+// This is a function for constructing the data structures which will go into
+// the GPU for computation
+fn construct_gpu_problem<S, E>
 (
     model: &mut gpu_model::GPUSCPM,
-    env: &mut E, 
-    w: Vec<f64>, 
-    eps: f64
-) -> (CxxMatrixf32, Vec<i32>, DenseMatrixf32)
+    env: &mut E,
+) -> (CxxMatrixf32, Vec<i32>, CxxMatrixf32, GPUProblemMetaData)
 where S: Copy + std::fmt::Debug + Hash + Eq + Send + Sync + 'static, 
     E: Env<S>, Solution<S>: DefineSolution<S> + GenericSolutionFunctions<S>  {
     let mut prods = model.construct_products(env);
@@ -744,6 +724,7 @@ where S: Copy + std::fmt::Debug + Hash + Eq + Send + Sync + 'static,
     // for each of the product model transition matrices which is the largest
     let mut max_size: i32 = 0;
     let mut nz = 0;
+    let mut rmax_nz: i32 = 0;
     let mut matrix_ranges: Vec<i32> = Vec::new();
     let mut initial_policy: Vec<i32> = Vec::new();
     let nobjs: usize = model.num_agents + model.tasks.size;
@@ -754,6 +735,8 @@ where S: Copy + std::fmt::Debug + Hash + Eq + Send + Sync + 'static,
             nz += mat.nz;
             max_size = std::cmp::max(max_size, mat.n);
             matrix_ranges.push(mat.m);
+            let r = prod.rewards_mat.get(&action).unwrap();
+            rmax_nz += (r.rows * r.cols) as i32;
         }   
         let mut pi: Vec<i32> = random_policy(prod).iter().map(|x| *x as i32).collect();
         initial_policy.append(&mut pi);
@@ -764,57 +747,72 @@ where S: Copy + std::fmt::Debug + Hash + Eq + Send + Sync + 'static,
 
     // what is the ordering of the product matrices, because this is also important
     // what is the size of the big matrix going to be?
-    let matrix_size: i32 = max_size.pow(2) * prods.len() as i32;
-    println!("size of GPU matrix: {} x {} = {}, sparsity %: {:.2}", 
-        prods.len() as i32 * max_size, max_size, matrix_size, (nz as f32 / matrix_size as f32) * 100.);
-
     // instantiate a new COO matrix
-    let prod_block = max_size * prods.len() as i32;
+    let prod_block: i32 = model.state_spaces
+        .iter()
+        .map(|(_, v)| *v)
+        .sum();
+    let matrix_size: i32 = (prod_block * env.get_action_space().len() as i32).pow(2);
+    println!("size of GPU matrix: {} x {} = {}, sparsity %: {:.2}", 
+        prod_block * env.get_action_space().len() as i32, 
+        prod_block * env.get_action_space().len() as i32, 
+        matrix_size,
+        (nz as f32 / matrix_size as f32) * 100.
+    );
+
+    let objs_prod_block = (nobjs * prods.len()) as i32;
     println!("matrix stride: {}", prod_block);
     let mut mat = CxxMatrixf32::make(
-        nz, prod_block * env.get_action_space().len() as i32, max_size, 0
+        nz, 
+        prod_block * env.get_action_space().len() as i32, 
+        prod_block * env.get_action_space().len() as i32, 
+        0
     );
-    let mut r = DenseMatrixf32::new(
-        prod_block as usize * env.get_action_space().len(), nobjs
+    let mut r = CxxMatrixf32::make(
+        rmax_nz,
+        prod_block * env.get_action_space().len() as i32,
+        objs_prod_block * env.get_action_space().len() as i32,
+        0
     );
     let mut mat_coo: Vec<(i32, i32, f32)> = Vec::new();
     for action in env.get_action_space().iter() {
         for (z, prod) in prods.iter_mut().enumerate() {
-            println!("agent {}, task: {}", prod.agent_id, prod.task_id);
-            // we need to consume this matrix at this point so as not to double up on memory
             let prod_triple = prod.transition_mat.remove(action).unwrap();
+            // sum the state spaces up to z
+            let block_size: i32 = model.state_spaces
+                .iter()
+                .filter(|(k, _)| (**k as usize) < z)
+                .map(|(_, v)| *v)
+                .sum();
+            
+                println!("agent {}, task: {}, base_idx: {}", 
+                prod.agent_id, prod.task_id, block_size + action * prod_block);
 
+            // we need to consume this matrix at this point so as not to double up on memory
             // insert the triple into the large coo mat
             for k in 0..prod_triple.nz {
-
                 mat_coo.push((
-                    prod_triple.i[k as usize] + (z as i32) * max_size + action * prod_block,
-                    prod_triple.p[k as usize],
+                    prod_triple.i[k as usize] + block_size + action * prod_block,
+                    prod_triple.p[k as usize] + block_size + action * prod_block,
                     prod_triple.x[k as usize]
                 ));
             }
+            // free rprod to be consumed by the larger matrix
             let rprod = prod.rewards_mat.remove(action).unwrap();
-            // the reward matrix will need to be padded
-            // what is the difference between rprod.num_rows and max_size,
-            // also because it is column major format we can't just stick the zeros at the end
-            // we actually have to copy the entire matrix over referencing column major format for the new size
-            let mut new_temp_dense_matrix = 
-                DenseMatrixf32::new(max_size as usize, nobjs);
-            new_temp_dense_matrix.m = vec![0.; max_size as usize * nobjs];
-            for c in 0..nobjs {
-                for r in 0..max_size as usize {
-                    if r < rprod.rows {
-                        // this is fine
-                        new_temp_dense_matrix.m[c * max_size as usize + r] = 
-                            rprod.m[c * rprod.rows + r];
-                    }
+            
+            for row_ in 0..rprod.rows as usize {
+                for c in 0..nobjs {
+                    let rval = rprod.m[c * rprod.rows + row_];
+                    r.triple_entry(
+                        row_ as i32 + block_size + action * prod_block, 
+                        c as i32 + (z as i32) * nobjs as i32 + action * objs_prod_block, 
+                        rval
+                    )
                 }
             }
-            // both rprod and new_temp_dense_matrix are both dropped from
-            // mem at this point, so overall our mem should be stable
-            r.m.append(&mut new_temp_dense_matrix.m);
         }
     }
+    // The triple entries need to be sorted before they can be entered into
     mat_coo.sort_by(
         |(a1, a2, _), (b1, b2, _)| 
         (a1, a2).cmp(&(b1, b2))
@@ -824,29 +822,14 @@ where S: Copy + std::fmt::Debug + Hash + Eq + Send + Sync + 'static,
         mat.triple_entry(i, j, val);
     }
 
-    let mut value: Vec<f32> = vec![0.; max_size as usize];
-    let mut trans_output: Vec<i32> = vec![0; prod_block as usize * max_size as usize];
-    let mut reward_output: Vec<i32> = vec![0; prod_block as usize * nobjs];
+    // Store the problem metadata
+    let meta = GPUProblemMetaData {
+        max_size: max_size as usize,
+        transition_prod_block_size: prod_block as usize,
+        reward_obj_prod_block_size: objs_prod_block as usize,
+    };
 
-    println!("mat nz: {}", mat.nz);
-    
-    test_initial_policy_value_ffi(
-        &initial_policy,
-        max_size,
-        prod_block,
-        prod_block * env.get_action_space().len() as i32,
-        &mut value,
-        &mut trans_output,
-        &mut reward_output,
-        &mat,
-        &r.m,
-        nobjs as i32
-    );
-
-    println!("trans output:\n{:?}", trans_output);
-    println!("reward_ouput:\n{:?}", reward_output);
-
-    (mat, initial_policy, r)
+    (mat, initial_policy, r, meta)
 }
 
 /// A Python module implemented in Rust.
@@ -864,6 +847,8 @@ fn ce(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<MessageSender>()?;
     m.add_class::<Executor>()?;
     m.add_class::<SerialisableExecutor>()?;
+    m.add_class::<CxxMatrixf32>()?;
+    m.add_class::<GPUProblemMetaData>()?;
     //m.add_function(wrap_pyfunction!(build_model, m)?)?;
     //m.add_function(wrap_pyfunction!(value_iteration_test, m)?)?;
     m.add_function(wrap_pyfunction!(message::test_prod, m)?)?;
@@ -872,8 +857,15 @@ fn ce(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(message::msg_scheduler_synthesis, m)?)?;
     m.add_function(wrap_pyfunction!(json_deserialize_from_string, m)?)?;
     m.add_function(wrap_pyfunction!(message::test_gpu_matrix, m)?)?;
-    m.add_function(wrap_pyfunction!(gpu_scpm::gpu_dp_utils::map_policy_to_gather, m)?)?;
-    m.add_function(wrap_pyfunction!(test_thrust_gather_ffi, m)?)?;
+    m.add_function(wrap_pyfunction!(message::test_compress, m)?)?;
+    m.add_function(wrap_pyfunction!(message::test_initial_policy, m)?)?;
+    m.add_function(wrap_pyfunction!(message::gpu_test_csr_mv, m)?)?;
+    m.add_function(wrap_pyfunction!(compress, m)?)?;
+    m.add_function(wrap_pyfunction!(message::test_cpu_init_pi, m)?)?;
+    m.add_function(wrap_pyfunction!(message::test_argmax_csr, m)?)?;
+    m.add_function(wrap_pyfunction!(message::test_cpu_converged_init_pi, m)?)?;
+    m.add_function(wrap_pyfunction!(message::test_output_trans_matrix, m)?)?;
+    m.add_function(wrap_pyfunction!(message::test_output_rewards_matrix, m)?)?;
     //m.add_function(wrap_pyfunction!(process_scpm, m)?)?;
     //m.add_function(wrap_pyfunction!(test_scpm, m)?)?;
     Ok(())
