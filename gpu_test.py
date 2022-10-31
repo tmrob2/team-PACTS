@@ -1,3 +1,4 @@
+from pyexpat import model
 from re import M
 import ce
 
@@ -44,8 +45,6 @@ eps = 0.00001
 P, pi, R, data = ce.test_gpu_matrix(scpm, msg_env)
 NUM_MDPS = NUM_AGENTS * NUM_TASKS
 
-print("R\n",R.x)
-
 import scipy
 import numpy as np
 np.set_printoptions(suppress=True)
@@ -55,10 +54,19 @@ csr_test = coo_test.tocsr().toarray()
 #Pcsr = ce.test_compress(P)
 Pcsr = ce.compress(P)
 Rcsr = ce.compress(R)
-print("i", list(enumerate(Pcsr.i)))
-print("j", Pcsr.p)
-print("x", Pcsr.x)
-csr = scipy.sparse.csr_array((P.x, Pcsr.p, Pcsr.i), shape=(Pcsr.m, Pcsr.n)).toarray();
+#print("i", list(enumerate(Pcsr.i)))
+#print("j", Pcsr.p)
+#print("x", Pcsr.x)
+csr = scipy.sparse.csr_array((Pcsr.x, Pcsr.p, Pcsr.i), shape=(Pcsr.m, Pcsr.n)).toarray();
+
+print("\Transition matrix")
+for r in range(Pcsr.m):
+    print("|", end=" ")
+    for c in range(Pcsr.n):
+        if c < Pcsr.n - 1:
+            print(f"{csr[r, c]:.2f}", end=" ")
+        else:
+            print(f"{csr[r, c]:.2f} |")
 
 print("CSR construction correct", (csr == csr_test).all())
 
@@ -96,7 +104,7 @@ argmaxR = scipy.sparse.csr_array(
     shape=(data.transition_prod_block_size, data.reward_obj_prod_block_size)
 ).toarray()
 
-print("\nArgmax Rewards matrix @ test policy: ", pitest)
+print("\nArgmax Rewards matrix @ test policy: ", np.array(pitest))
 for r in range(data.transition_prod_block_size):
     print("|", end=" ")
     for c in range(data.reward_obj_prod_block_size):
@@ -121,7 +129,7 @@ print("TEST: CPU step 0 val for test policy\n", cpu_test_val)
 print("Trans block size: ", data.transition_prod_block_size)
 print("Reward block size: ", data.reward_obj_prod_block_size)
 
-ce.test_initial_policy(
+vmv = ce.test_initial_policy(
     pitest, 
     Pcsr, 
     Rcsr, 
@@ -129,7 +137,8 @@ ce.test_initial_policy(
     data.transition_prod_block_size,
     data.reward_obj_prod_block_size,
     w_test,
-    rmv
+    rmv,
+    eps
 )
 
 testval = ce.test_cpu_converged_init_pi(
@@ -141,7 +150,11 @@ testval = ce.test_cpu_converged_init_pi(
     0
 )
 
-print("TEST: Output from CPU init value for test policy", testval)
+print("TEST: VALUE GPU == CPU", 
+    "SUCCEEDED" if (np.round(np.array(vmv), 2) == np.round(np.array(testval), 2)).all() \
+        else "FAILED")
+
+print("TEST: Output from CPU init value for test policy\n", testval)
 
 (i, j, x, nz, nc, nr) = ce.test_output_trans_matrix(
     cpu_scpm,
@@ -164,8 +177,16 @@ cpu_rewards, rnc, rnr = ce.test_output_rewards_matrix(
 
 test_rewards = np.array(cpu_rewards).reshape(rnr, rnc, order="F")
 #print(test_rewards)
-        
 
+
+print("TEST: VALUE ITERATION")
+ce.test_gpu_value_iteration(
+    scpm,
+    msg_env,
+    [0.5, 0.5],
+    0.0001
+)
+print("TEST: END\n\n")
 mission = ce.Mission()
 for repeat in range(2):
     dfa = message_sending_task(repeat + 1)
@@ -177,11 +198,12 @@ eps = 0.00001
 
 P, pi, R, data = ce.test_gpu_matrix(scpm, msg_env)
 
+
 Pcsr = ce.compress(P)
 Rcsr = ce.compress(R)
 rmv = [0.] * data.transition_prod_block_size
 
-print("pi", pi)
+print("pi", np.array(pi))
 pitest2 = [0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 
            0, 1, 0, 0, 0, 0, 1, 0, 0, 1, 
            0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 
@@ -193,31 +215,31 @@ pitest2 = [0, 0, 1, 0, 0, 1, 0, 0, 0, 0,
 #           0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 
 #           0, 0, 0, 1, 0, 0, 0, 0, 0, 0]
 
-argmaxR = ce.test_argmax_csr(
-    Rcsr, 
+argmaxP = ce.test_argmax_csr(
+    Pcsr, 
     pitest2, 
     data.transition_prod_block_size, 
-    data.reward_obj_prod_block_size
+    data.transition_prod_block_size
 )
 
-argmaxR = scipy.sparse.csr_array(
-    (argmaxR.x, argmaxR.p, argmaxR.i),
-    shape=(data.transition_prod_block_size, data.reward_obj_prod_block_size)
+argmaxP = scipy.sparse.csr_array(
+    (argmaxP.x, argmaxP.p, argmaxP.i),
+    shape=(data.transition_prod_block_size, data.transition_prod_block_size)
 ).toarray()
 
-print("transition block size", data.transition_prod_block_size)
-print("reward block size", data.reward_obj_prod_block_size)
-
-#print("\nArgmax Rewards matrix @ test policy: \n",pitest2)
+#print("transition block size", data.transition_prod_block_size)
+#print("reward block size", data.reward_obj_prod_block_size)
+#
+#print("\nArgmax Trans matrix @ test policy: \n",pitest2)
 #for r in range(data.transition_prod_block_size):
 #    print("|", end=" ")
-#    for c in range(data.reward_obj_prod_block_size):
-#        if c < data.reward_obj_prod_block_size - 1:
-#            print(f"{argmaxR[r, c]:.2f}", end=" ")
+#    for c in range(data.transition_prod_block_size):
+#        if c < data.transition_prod_block_size - 1:
+#            print(f"{argmaxP[r, c]:.2f}", end=" ")
 #        else:
-#            print(f"{argmaxR[r, c]:.2f} |")
+#            print(f"{argmaxP[r, c]:.2f} |")
 
-ce.test_initial_policy(
+a2t2gpuvalue = ce.test_initial_policy(
     pitest2, 
     Pcsr, 
     Rcsr, 
@@ -225,7 +247,8 @@ ce.test_initial_policy(
     data.transition_prod_block_size,
     data.reward_obj_prod_block_size,
     wgpu,
-    rmv
+    rmv,
+    eps
 )
 
 cpu_scpm = ce.SCPM(mission, 2, list(range(2)))
@@ -247,15 +270,71 @@ for agent in range(2):
             agent,
             task
         )
-        print("test val new:", testval)
-        total_val.append(testval)
+        #print("test val new:", testval)
+        total_val.extend(testval)
         state_size += current_size
         cntr += 1
 #
-#print("TEST: Output from CPU init value for test policy", testval)
+print("TEST: A2T2 GPU == CPU", 
+    "SUCCEEDED" if (np.round(np.array(a2t2gpuvalue)) \
+        == np.round(np.array(total_val))).all() else "FAILED"
+)
+
+opt_pi = ce.test_policy_optimisation(
+    a2t2gpuvalue,
+    pitest2,
+    Pcsr,
+    Rcsr,
+    [0.5, 0.5, 0.0, 0.0],
+    0.0001,
+    2,
+    4,
+    data.transition_prod_block_size
+)
+
+NobjSparse = ce.test_nobj_argmax_csr(
+    Pcsr,
+    opt_pi,
+    data.transition_prod_block_size,
+    data.transition_prod_block_size,
+    1
+)
+
+print("m:", NobjSparse.m)
+print("n", NobjSparse.n)
+print("nz", NobjSparse.nz)
+
+nobjscipy = scipy.sparse.csr_array(
+    (NobjSparse.x, NobjSparse.p, NobjSparse.i),
+    shape=(NobjSparse.m, NobjSparse.n)
+).toarray()
+obj = 0
+rbl = data.transition_prod_block_size
+cbl = data.transition_prod_block_size       
+#cbl = data.transition_prod_block_size
+rstart = obj * rbl
+rend = (obj + 1) * rbl
+cstart = obj * cbl
+cend = (obj + 1) * cbl
+for r in range(rstart, rend):
+    print("|", end=" ")
+    for c in range(cstart, cend):
+        val = nobjscipy[r, c]
+        if c < cend - 1:
+            if val == 0:
+                print(f"0.  ", end=" ")
+            else:
+                print(f"{val:.2f}", end=" ")
+        else:
+            if val == 0:
+                print(f"0.    |",)
+            else:
+                print(f"{val:.2f}")
 
 
-
-
-
-
+ce.test_gpu_value_iteration(
+    scpm,
+    msg_env,
+    [0.25, 0.25, 0.25, 0.25],
+    0.0001
+)

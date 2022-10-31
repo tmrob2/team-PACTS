@@ -2,18 +2,19 @@ use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use hashbrown::HashMap;
 use crate::agent::agent::Env;
-use crate::sparse::argmax::argmaxM;
-use crate::{generic_scheduler_synthesis_without_execution, test_csr_create_ffi, GPUProblemMetaData, deconstruct};
+use crate::gpu_scpm::dp::gpu_value_iteration;
+use crate::gpu_scpm::gpu_model::GPUSCPM;
+use crate::{generic_scheduler_synthesis_without_execution, test_csr_create_ffi, GPUProblemMetaData, deconstruct, double_vec, policy_optimisation_ffi};
 use crate::sparse::definition::CxxMatrixf32;
 use crate::sparse::{compress, argmax};
-use crate::test_initial_policy_value_ffi;
-use crate::gpu_scpm::gpu_model;
+use crate::initial_policy_value_ffi;
 use crate::construct_gpu_problem;
 use crate::scpm::model::{SCPM, build_model};
 use crate::algorithm::dp::value_iteration;
 use crate::test_csr_spmv_ffi;
 use crate::SparseMatrix;
 use std::time::Instant;
+use crate::gpu_model;
 
 type State = i32;
 
@@ -324,14 +325,14 @@ pub fn test_initial_policy(
     trans_col_block_size: i32,
     reward_col_block_size: i32,
     w: Vec<f32>,
-    mut rmv: Vec<f32>
-) {
+    mut rmv: Vec<f32>,
+    eps: f32
+) -> Vec<f32> {
     // output mutable value vector
-    let mut value: Vec<f32> = vec![0.; row_block_size as usize];
     
     //println!("P mat nz: {}", P.nz);
     //println!("R mat nz: {}", R.nz);
-    println!("Policy: {:?}", pi);
+    //println!("Policy: {:?}", pi);
 
     // with the initial policy create the argmax P matrix and R matrix
     //let row_idx_from_policy: 
@@ -353,24 +354,73 @@ pub fn test_initial_policy(
 
     let mut x = vec![0.; row_block_size as usize];
     let mut y = vec![0.; row_block_size as usize];
-    println!("rx: \n{:?}", argmaxR.x);
-    println!("rnz: {}", argmaxR.nz);
-    println!("rcols: {}", argmaxR.n);
-    println!("rrows: {}", argmaxR.m);
-    println!("|rmv| {}", rmv.len());
-    test_initial_policy_value_ffi(
-        &mut value,
+    initial_policy_value_ffi(
         &argmaxP,
         &argmaxR,
         &mut x,
         &mut y,
         &w,
-        &mut rmv
+        &mut rmv,
+        eps
     );
 
-    println!("y:\n{:?}", y);
-    println!("rmv:\n{:?}", rmv);
+    //println!("y:\n{:.2?}", y);
+    //println!("rmv:\n{:?}", rmv);
+    y
 
+}
+
+#[pyfunction]
+pub fn test_policy_optimisation(
+    init_value: Vec<f32>,
+    mut policy: Vec<i32>,
+    P: CxxMatrixf32,
+    R: CxxMatrixf32,
+    w: Vec<f32>, // Make a design choice on how to interpret w 
+    eps: f32,
+    num_actions: i32,
+    num_models: i32,
+    block_size: i32
+) -> Vec<i32> {
+    let mut x: Vec<f32> = vec![0.; P.n as usize];
+    let mut y: Vec<f32> = vec![0.; P.n as usize];
+    let rmv: Vec<f32> = vec![0.; P.n as usize];
+    // repeat w |A| times
+    let mut w_: Vec<f32> = 
+        Vec::with_capacity(w.len() * (num_actions * num_models) as usize);
+    let mut init_value_: Vec<f32> = 
+        Vec::with_capacity(init_value.len() * (num_actions * num_models) as usize);
+    for _ in 0..(num_actions * num_models) {
+        w_.extend(&w); // this makes (|W|.|A|) x 1
+    }
+    for _ in 0..(num_actions) {
+        init_value_.extend(&init_value);
+    }
+    println!("w_: \n{:?}", w_);
+
+    assert_eq!(w_.len(), R.n as usize);
+    assert_eq!(init_value_.len(), P.n as usize);
+
+    println!("R.n: {}", R.n);
+    println!("R.m: {}", R.m);
+    //println!("Pi: \n{:?}", policy);
+    // the init_value vector also needs to be repeated
+    policy_optimisation_ffi(
+        &init_value_, 
+        &mut policy,
+        &P, 
+        &R, 
+        &w_, 
+        &mut x, 
+        &mut y,
+        &rmv, 
+        eps,
+        block_size,
+        num_actions
+    );
+    println!("y\n{:.2?}\n", &y[.. block_size as usize]);
+    println!("Pi[{}]\n{:?}\n", policy.len(), policy);
+    policy
 }
 
 #[pyfunction]
@@ -450,3 +500,24 @@ pub fn test_argmax_csr(
     argmax::argmaxM(&mat, &pi, row_block, col_block)
 }
 
+#[pyfunction]
+pub fn test_nobj_argmax_csr(
+    mat: CxxMatrixf32,
+    pi: Vec<i32>,
+    row_block: i32,
+    col_block: i32,
+    nobjs: usize
+) -> CxxMatrixf32 {
+    argmax::multiobj_argmaxP(&mat, &pi, row_block, col_block, nobjs)
+}
+
+
+#[pyfunction]
+pub fn test_gpu_value_iteration(
+    model: &mut gpu_model::GPUSCPM,
+    env: &mut MessageSender,
+    w: Vec<f32>,
+    eps: f32
+) {
+    gpu_value_iteration(model, env, &w, eps);
+}

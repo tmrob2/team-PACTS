@@ -15,6 +15,7 @@ pub mod sparse;
 
 use std::hash::Hash;
 use std::mem;
+use std::thread::current;
 use std::time::Instant;
 use agent::agent::Env;
 use executor::executor::{GenericSolutionFunctions, DefineSolution, 
@@ -71,9 +72,9 @@ pub fn test_csr_create_ffi(m: i32, n: i32, nnz: i32, i: &[i32], j: &[i32], x: &[
     }
 }
 
+#[link(name="cudatest", kind="static")]
 extern "C" {
-    fn test_initial_policy_value(
-        value: *mut f32,
+    fn initial_policy_value(
         pm: i32,
         pn: i32,
         pnz: i32,
@@ -89,23 +90,23 @@ extern "C" {
         x: *mut f32,
         y: *mut f32,
         w: *const f32,
-        rmv: *mut f32
+        rmv: *mut f32,
+        eps: f32
     );
 }
 
 // TODO this needs the library linking 
-pub fn test_initial_policy_value_ffi(
-    value: &mut [f32],
+pub fn initial_policy_value_ffi(
     P: &CxxMatrixf32,
     R: &CxxMatrixf32,
     x: &mut [f32],
     y: &mut [f32],
     w: &[f32],
-    rmv: &mut [f32]
+    rmv: &mut [f32],
+    eps: f32
 ) {
     unsafe {
-        test_initial_policy_value(
-            value.as_mut_ptr(),
+        initial_policy_value(
             P.m,
             P.n,
             P.nz,
@@ -121,7 +122,111 @@ pub fn test_initial_policy_value_ffi(
             x.as_mut_ptr(),
             y.as_mut_ptr(),
             w.as_ptr(),
-            rmv.as_mut_ptr()
+            rmv.as_mut_ptr(),
+            eps
+        );
+    }
+}
+
+#[link(name="cudatest", kind="static")]
+extern "C" {
+    fn policy_optimisation(
+        init_value: *const f32,
+        init_pi: *const i32,
+        pm: i32, 
+        pn: i32,
+        pnz: i32,
+        pi: *const i32,
+        pj: *const i32,
+        px: *const f32,
+        rm: i32,
+        rn: i32,
+        rnz: i32,
+        ri: *const i32,
+        rj: *const i32,
+        rx: *const f32,
+        x: *mut f32,
+        y: *mut f32,
+        rmv: *const f32,
+        w: *const f32,
+        eps: f32,
+        block_size: i32,
+        nact: i32
+    );
+}
+
+pub fn policy_optimisation_ffi(
+    init_value: &[f32],
+    policy: &mut [i32],
+    P: &CxxMatrixf32,
+    R: &CxxMatrixf32,
+    w: &[f32],
+    x: &mut [f32],
+    y: &mut [f32],
+    rmv: &[f32],
+    eps: f32,
+    block_size: i32,
+    nact: i32
+) {
+    unsafe {
+        policy_optimisation(
+            init_value.as_ptr(), 
+            policy.as_mut_ptr(),
+            P.m, 
+            P.n, 
+            P.nz, 
+            P.i.as_ptr(), 
+            P.p.as_ptr(), 
+            P.x.as_ptr(), 
+            R.m, 
+            R.n, 
+            R.nz, 
+            R.i.as_ptr(), 
+            R.p.as_ptr(), 
+            R.x.as_ptr(), 
+            x.as_mut_ptr(), 
+            y.as_mut_ptr(), 
+            rmv.as_ptr(),
+            w.as_ptr(),
+            eps,
+            block_size,
+            nact
+        )
+    }
+}
+
+#[link(name="cudatest", kind="static")]
+extern "C" {
+    fn multi_objective_values(
+        R: *const f32,
+        pi: *const i32,
+        pj: *const i32,
+        px: *const f32,
+        pm: i32,
+        pn: i32,
+        pnz: i32,
+        eps: f32,
+        x: *mut f32
+    );
+}
+
+pub fn multi_objective_values_ffi(
+    R: &[f32],
+    P: &CxxMatrixf32,
+    eps: f32,
+    x: &mut [f32]
+) {
+    unsafe {
+        multi_objective_values(
+            R.as_ptr(), 
+            P.i.as_ptr(), 
+            P.p.as_ptr(), 
+            P.x.as_ptr(), 
+            P.m, 
+            P.n, 
+            P.nz, 
+            eps, 
+            x.as_mut_ptr()
         );
     }
 }
@@ -258,7 +363,8 @@ pub struct GPUProblemMetaData {
     #[pyo3(get)]
     pub transition_prod_block_size: usize,
     #[pyo3(get)]
-    pub reward_obj_prod_block_size: usize
+    pub reward_obj_prod_block_size: usize,
+    pub init_state_idx: Vec<usize>
 }
 
 #[derive(Debug)]
@@ -728,6 +834,9 @@ where S: Copy + std::fmt::Debug + Hash + Eq + Send + Sync + 'static,
     let mut matrix_ranges: Vec<i32> = Vec::new();
     let mut initial_policy: Vec<i32> = Vec::new();
     let nobjs: usize = model.num_agents + model.tasks.size;
+    let mut init_state_idx: Vec<usize> = Vec::new();
+
+    let mut current_states_size = 0;
     
     for prod in prods.iter() {
         for action in env.get_action_space().iter() {
@@ -740,6 +849,11 @@ where S: Copy + std::fmt::Debug + Hash + Eq + Send + Sync + 'static,
         }   
         let mut pi: Vec<i32> = random_policy(prod).iter().map(|x| *x as i32).collect();
         initial_policy.append(&mut pi);
+        init_state_idx.push(
+            *prod.get_state_map().get(&prod.initial_state).unwrap() + 
+            current_states_size
+        );
+        current_states_size += prod.states.len();
     }
 
     println!("maximum product state space: {}", max_size);
@@ -827,6 +941,7 @@ where S: Copy + std::fmt::Debug + Hash + Eq + Send + Sync + 'static,
         max_size: max_size as usize,
         transition_prod_block_size: prod_block as usize,
         reward_obj_prod_block_size: objs_prod_block as usize,
+        init_state_idx
     };
 
     (mat, initial_policy, r, meta)
@@ -866,7 +981,8 @@ fn ce(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(message::test_cpu_converged_init_pi, m)?)?;
     m.add_function(wrap_pyfunction!(message::test_output_trans_matrix, m)?)?;
     m.add_function(wrap_pyfunction!(message::test_output_rewards_matrix, m)?)?;
-    //m.add_function(wrap_pyfunction!(process_scpm, m)?)?;
-    //m.add_function(wrap_pyfunction!(test_scpm, m)?)?;
+    m.add_function(wrap_pyfunction!(message::test_policy_optimisation,m)?)?; 
+    m.add_function(wrap_pyfunction!(message::test_nobj_argmax_csr, m)?)?;
+    m.add_function(wrap_pyfunction!(message::test_gpu_value_iteration, m)?)?;
     Ok(())
 }
