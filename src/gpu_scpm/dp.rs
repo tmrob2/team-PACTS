@@ -111,7 +111,7 @@ E: Env<S>, Solution<S>: DefineSolution<S> + GenericSolutionFunctions<S> {
     );
 
     //let bl_ = data.transition_prod_block_size;
-    //println!("argmax R: \n{:?}", &argmaxR); //[2 * bl_..3 * bl_]);
+    println!("argmax R: \n{:?}", &argmaxR); //[2 * bl_..3 * bl_]);
     
     let mut x = vec![0.; data.transition_prod_block_size];
     assert_eq!(argmaxR.len(), argmaxP.m as usize);
