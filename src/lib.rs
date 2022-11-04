@@ -38,7 +38,7 @@ use dfa::dfa::{DFA, Mission, json_deserialize_from_string};
 use c_binding::suite_sparse::*;
 extern crate blis_src;
 extern crate cblas_sys;
-use cblas_sys::{cblas_dcopy, cblas_dgemv, cblas_dscal, cblas_ddot};
+use cblas_sys::{cblas_dcopy, cblas_dgemv, cblas_dscal, cblas_ddot, cblas_sdot};
 //use algorithm::dp::value_iteration;
 use float_eq::float_eq;
 use std::fs;
@@ -514,6 +514,12 @@ fn blas_dot_product(v1: &[f64], v2: &[f64]) -> f64 {
     }
 }
 
+fn blas_dot_productf32(v1: &[f32], v2: &[f32]) -> f32 {
+    unsafe {
+        cblas_sdot(v1.len() as i32, v1.as_ptr(), 1, v2.as_ptr(), 1)
+    }
+}
+
 fn blas_matrix_vector_mulf64(matrix: &[f64], v: &[f64], m: i32, n: i32, result: &mut [f64]) {
     unsafe {
         cblas_dgemv(
@@ -648,6 +654,18 @@ fn solver(hullset: Vec<Vec<f64>>, t: Vec<f64>, nobjs: usize) -> Result<Vec<f64>,
     Ok(result)
 }
 
+fn solverf32(hullset: Vec<Vec<f32>>, t: Vec<f32>, nobjs: usize) -> Result<Vec<f32>, Box<dyn std::error::Error>> {
+    let solver_script_call = include_str!("lp/pylp.py");
+    let result: Vec<f32> = Python::with_gil(|py| -> PyResult<Vec<f32>> {
+        let lpsolver = PyModule::from_code(py, solver_script_call, "", "")?;
+        let solver_result = lpsolver.getattr("hyperplane_solver")?.call1(
+            (hullset, t, nobjs,)
+        )?.extract()?;
+        Ok(solver_result)
+    }).unwrap();
+    Ok(result)
+}
+
 fn random_sched(
     alloc: Vec<(i32, i32, i32, Vec<f64>)>, 
     t: Vec<f64>, 
@@ -686,6 +704,36 @@ fn new_target(
 ) -> Result<Vec<f64>, Box<dyn std::error::Error>> {
     let new_target_script = include_str!("lp/pylp.py");
     let result: Vec<f64> = Python::with_gil(|py| -> PyResult<Vec<f64>> {
+        let lpnewtarget = PyModule::from_code(py, new_target_script, "", "")?;
+        let lpnewtarget_result = lpnewtarget.getattr("eucl_new_target")?.call1((
+            hullset,
+            weights,
+            target,
+            l,
+            //m,
+            n,
+            //iteration,
+            //cstep,
+            //pstep
+        ))?.extract()?;
+        Ok(lpnewtarget_result)
+    }).unwrap();
+    Ok(result)
+}
+
+fn new_targetf32(
+    hullset: Vec<Vec<f32>>, 
+    weights: Vec<Vec<f32>>, 
+    target: Vec<f32>,
+    l: usize,
+    //m: usize,
+    n: usize,
+    //iteration: usize,
+    //cstep: f32,
+    //pstep: f32
+) -> Result<Vec<f32>, Box<dyn std::error::Error>> {
+    let new_target_script = include_str!("lp/pylp.py");
+    let result: Vec<f32> = Python::with_gil(|py| -> PyResult<Vec<f32>> {
         let lpnewtarget = PyModule::from_code(py, new_target_script, "", "")?;
         let lpnewtarget_result = lpnewtarget.getattr("eucl_new_target")?.call1((
             hullset,
@@ -984,5 +1032,6 @@ fn ce(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(message::test_policy_optimisation,m)?)?; 
     m.add_function(wrap_pyfunction!(message::test_nobj_argmax_csr, m)?)?;
     m.add_function(wrap_pyfunction!(message::test_gpu_value_iteration, m)?)?;
+    m.add_function(wrap_pyfunction!(message::test_gpu_synth, m)?)?;
     Ok(())
 }

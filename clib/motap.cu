@@ -8,7 +8,7 @@
 #include <thrust/extrema.h>
 #include <thrust/execution_policy.h>
 
-int MAX_ITERATIONS = 10;
+int MAX_ITERATIONS = 100;
 
 /*
 #######################################################################
@@ -44,6 +44,7 @@ __global__ void max_value(
         }
         for (int k = 1; k < nact; k++) {
             if (eps[tid] < y[k * prod_block + tid] - x[tid]) {
+                eps[tid] = y[k * prod_block + tid] - x[tid];
                 pinew[tid] = k;
                 xnew[tid] = y[k * prod_block + tid];
             }
@@ -63,8 +64,7 @@ __global__ void abs_diff(float *a, float *b, float *c, int m) {
     int tid = blockIdx.x * blockDim.x + threadIdx.x; // HANDLE THE DATA AT THIS INDEX
     if (tid < m) {
         // compute the absolute diff between two elems
-        float temp = b[tid] - a[tid];
-        c[tid] = temp;
+        c[tid] = fabsf(b[tid] - a[tid]);
     } 
 }
 
@@ -466,7 +466,7 @@ int initial_policy_value(
     
     // copy the vector from host memory to device memory
     cudaMemcpy(dX, x, pn * sizeof(float), cudaMemcpyHostToDevice);
-    //cudaMemcpy(dStaticY, static_y, pm * sizeof(float), cudaMemcpyHostToDevice);
+    cudaMemcpy(dStaticY, static_y, pm * sizeof(float), cudaMemcpyHostToDevice);
 
     // create a dense vector on device memory
     cusparseCreateDnVec(&vecX, pn, dX, CUDA_R_32F);
@@ -548,17 +548,18 @@ int initial_policy_value(
         // what is the difference between dY and dX
 
         // EPSILON COMPUTATION
-        abs_diff_launcher(dX, dY, dZ, pm);
+        abs_diff_launcher(dY, dX, dZ, pm);
         //CHECK_CUBLAS(cublasIsamax(blashandle, pm, dZ, 1, &iepsilon));
 
         thrust::device_ptr<float> dev_ptr(dZ);
         maxeps = *thrust::max_element(thrust::device, dev_ptr, dev_ptr + pm);
-        
+
         CHECK_CUBLAS(cublasScopy(blashandle, pm, dY, 1, dX, 1));
         // RESET Y
         CHECK_CUBLAS(cublasScopy(blashandle, pm, dStaticY, 1, dY, 1));
+        //std::cout << "EPS_TEST " << "THRUST "<< maxeps << std::endl;
         if (maxeps < eps) {
-            printf("EPS TOL REACHED in %i ITERATIONS\n", algo_i);
+            printf("INITIAL POLICY GENERATED; EPS TOL REACHED in %i ITERATIONS\n", algo_i);
             break;
         }
     }
@@ -594,6 +595,7 @@ int initial_policy_value(
     cudaFree(dBuffer);
     cudaFree(dBufferR);
     free(epsilon);
+    free(static_y);
     
 }
 
@@ -645,7 +647,7 @@ int policy_optimisation(
     CHECK_CUDA(cudaMemcpy(PI, Pi, block_size * sizeof(int), cudaMemcpyHostToDevice));
     CHECK_CUDA(cudaMemcpy(PI_new, Pi, block_size * sizeof(int), cudaMemcpyHostToDevice));
 
-    printf("\n");
+    /*printf("\n");
     for (int k = 0; k<block_size; k++) {
         if (k == 0) {
             printf("Pi: %i, ", Pi[k]);
@@ -653,7 +655,7 @@ int policy_optimisation(
             printf("%i, ", Pi[k]);
         }
     }
-    printf("\n");
+    printf("\n");*/
 
     // allocated the device memory for the COO matrix
 
@@ -806,9 +808,8 @@ int policy_optimisation(
 
     for (int algo_i = 0; algo_i < MAX_ITERATIONS; algo_i ++) {
 
-        CHECK_CUDA(cudaMemcpy(y, dY, pm * sizeof(float), cudaMemcpyDeviceToHost));
-       
         /*
+        CHECK_CUDA(cudaMemcpy(y, dY, pm * sizeof(float), cudaMemcpyDeviceToHost));  
         printf("BEFORE M.v\n");
         for (int k = 0; k<pm; k++) {
             if (k == 0) {
@@ -847,13 +848,13 @@ int policy_optimisation(
         // compute the max value 
         // reset y to zero
 
-        CHECK_CUDA(cudaMemcpy(y, dZ, pm * sizeof(float), cudaMemcpyDeviceToHost));
+        //CHECK_CUDA(cudaMemcpy(y, dZ, pm * sizeof(float), cudaMemcpyDeviceToHost));
         
         CHECK_CUBLAS(cublasScopy(blashandle, pm, dStaticY, 1, dY, 1));
         CHECK_CUBLAS(cublasScopy(blashandle, pm, d_tmp, 1, dX, 1));
         // std::cout << "EPS_TEST " << dev_ptr[iepsilon - 1] << "THRUST "<< maxeps << std::endl;
         if (maxeps < eps) {
-            printf("EPS TOL REACHED in %i ITERATIONS\n", algo_i);
+            printf("OPTIMISED POLICY GENERATED; EPS TOL REACHED in %i ITERATIONS\n", algo_i);
             break;
         }
     }
@@ -965,8 +966,6 @@ int multi_objective_values(
     // --------------TRANSITION MATRIX MULTIPLICATION SETUP------------
     float alpha = 1.0;
     float beta = 1.0;
-    float *epsilon = (float*) malloc(pm * sizeof(float));
-    int iepsilon;
 
     // assign the cuda memory for the vectors
     cusparseDnVecDescr_t vecX, vecY;
@@ -982,12 +981,11 @@ int multi_objective_values(
     CHECK_CUDA(cudaMalloc((void**)&d_tmp, pm * sizeof(float)));
     //cudaMalloc((void**)&d_eps, sizeof(float));
 
-    // create a initial Y vector
-    float *static_y = (float*) calloc(pm, sizeof(float));
-    
+    // create a initial X, Y vector
     // copy the vector from host memory to device memory
     CHECK_CUDA(cudaMemcpy(dX, x, pn * sizeof(float), cudaMemcpyHostToDevice));
-    //cudaMemcpy(dStaticY, static_y, pm * sizeof(float), cudaMemcpyHostToDevice);
+    CHECK_CUDA(cudaMemcpy(dStaticY, x, pm * sizeof(float), cudaMemcpyHostToDevice));
+    CHECK_CUDA(cudaMemcpy(dY, x, pm * sizeof(float), cudaMemcpyHostToDevice));
 
     // create a dense vector on device memory
     CHECK_CUSPARSE(cusparseCreateDnVec(&vecX, pn, dX, CUDA_R_32F));
@@ -1002,20 +1000,8 @@ int multi_objective_values(
     float maxeps;
     maxeps = 0.0f;
 
-    for (int algo_i = 0; algo_i < 1; algo_i ++) {
-
-        CHECK_CUDA(cudaMemcpy(x, dY, pm *sizeof(float), cudaMemcpyDeviceToHost));
-
-        printf("BEFORE M.v\n");
-        for (int k = 0; k<pm; k++) {
-            if (k == 0) {
-                printf("Y: %.2f, ", x[k]);
-            } else {
-                printf("%.2f, ", x[k]);
-            }
-        }
-        printf("\n");
-
+    for (int algo_i = 0; algo_i < MAX_ITERATIONS; algo_i ++) {
+        
         CHECK_CUSPARSE(cusparseSpMV(
         handle, CUSPARSE_OPERATION_NON_TRANSPOSE, 
         &alpha, descrP, vecX, &beta, vecY, CUDA_R_32F, 
@@ -1025,9 +1011,9 @@ int multi_objective_values(
 
         CHECK_CUBLAS(cublasSaxpy(blashandle, pm, &alpha, dRValPtr, 1, dY, 1));
 
+        /*
         CHECK_CUDA(cudaMemcpy(x, dY, pm *sizeof(float), cudaMemcpyDeviceToHost));
-
-        printf("AFTER R + P.v\n");
+        printf("BEFORE M.v\n");
         for (int k = 0; k<pm; k++) {
             if (k == 0) {
                 printf("Y: %.2f, ", x[k]);
@@ -1036,6 +1022,7 @@ int multi_objective_values(
             }
         }
         printf("\n");
+        */
 
         abs_diff_launcher(dX, dY, dZ, pm);
         //CHECK_CUBLAS(cublasIsamax(blashandle, pm, dZ, 1, &iepsilon));
@@ -1048,7 +1035,7 @@ int multi_objective_values(
         CHECK_CUBLAS(cublasScopy(blashandle, pm, dStaticY, 1, dY, 1));
         //printf("\nepsilon: %f\n", dev_ptr[iepsilon - 1]);
         if (maxeps < eps) {
-            printf("EPS TOL REACHED in %i ITERATIONS\n", algo_i);
+            printf("MULTI-OBJECTIVE VALUES GENERATED; EPS TOL REACHED in %i ITERATIONS\n", algo_i);
             break;
         }
     }
@@ -1074,8 +1061,6 @@ int multi_objective_values(
     cudaFree(dStaticY);
     cudaFree(dZ);
     cudaFree(dBuffer);
-    free(epsilon);
-
 }
 
 

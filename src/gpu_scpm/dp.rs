@@ -1,3 +1,5 @@
+use hashbrown::HashMap;
+
 use super::gpu_model;
 use crate::{Env, Solution, GenericSolutionFunctions,
     DefineSolution, construct_gpu_problem, initial_policy_value_ffi,
@@ -10,7 +12,7 @@ pub fn gpu_value_iteration<S, E>(
     env: &mut E,
     w: &[f32],
     eps: f32,
-)
+) ->  HashMap<(i32, i32, i32), f32>
 where S: Copy + std::fmt::Debug + Hash + Eq + Send + Sync + 'static, 
 E: Env<S>, Solution<S>: DefineSolution<S> + GenericSolutionFunctions<S> {
     let nobjs = model.num_agents + model.tasks.size;
@@ -22,7 +24,7 @@ E: Env<S>, Solution<S>: DefineSolution<S> + GenericSolutionFunctions<S> {
 
     // Transition and rewards matrices are consumed and replaces by 
     // their CSR equivalents. 
-    println!("init pi: \n{:?}", init_pi);
+    //println!("init pi: \n{:?}", init_pi);
     let Pcsr = crate::sparse::compress::compress(mat);
     let Rcsr = crate::sparse::compress::compress(r);
     
@@ -68,7 +70,7 @@ E: Env<S>, Solution<S>: DefineSolution<S> + GenericSolutionFunctions<S> {
     for _ in 0..(num_actions) {
         init_value_.extend(&y);
     }
-    println!("init value\n:{:?}", init_value_);
+    //println!("init value\n:{:?}", init_value_);
 
     // Reinitialise the input mem alloc vectors into the policy optimisation
     // interface
@@ -91,29 +93,34 @@ E: Env<S>, Solution<S>: DefineSolution<S> + GenericSolutionFunctions<S> {
         data.transition_prod_block_size as i32,
         num_actions as i32
     );
-    println!("updated policy: \n{:?}", policy);
-    println!("output value: \n{:?}", y);
+    //println!("updated policy: \n{:?}", policy);
+    //println!("output value: \n{:?}", y);
     
+    //println!("|trans block|: {}", data.transition_prod_block_size);
     
     let argmaxP = argmax::multiobj_argmaxP(
         &Pcsr, 
         &policy, 
         data.transition_prod_block_size as i32, 
         data.transition_prod_block_size as i32, 
-        1
+        nobjs
     );
     
     let argmaxR = argmax::multiobj_argmaxR(
         &Rcsr, 
         &policy, 
         data.transition_prod_block_size as i32, 
-        1
+        nobjs
     );
 
     //let bl_ = data.transition_prod_block_size;
-    println!("argmax R: \n{:?}", &argmaxR); //[2 * bl_..3 * bl_]);
+    //println!("argmax R: \n{:?}", argmaxR.iter().enumerate().collect::<Vec<(usize, &f32)>>()); //[2 * bl_..3 * bl_]);
+    //println!("argmax R: \n{:?}", &argmaxR); //[2 * bl_..3 * bl_]);
+
+    println!("|P| = {} x {}", argmaxP.m, argmaxP.n);
+    println!("|R| = {}", argmaxR.len());
     
-    let mut x = vec![0.; data.transition_prod_block_size];
+    let mut x = vec![0.; data.transition_prod_block_size * nobjs];
     assert_eq!(argmaxR.len(), argmaxP.m as usize);
     multi_objective_values_ffi(
         &argmaxR, 
@@ -122,23 +129,27 @@ E: Env<S>, Solution<S>: DefineSolution<S> + GenericSolutionFunctions<S> {
         &mut x
     );
 
-    println!("x:\n{:?}", x);
+    //println!("x:\n{:?}", x);
 
     // get the indices of x which correspond to the initial values
     // for each of the product models
     let mut pid = 0;
     let init_states = data.init_state_idx;
     let bl = data.transition_prod_block_size;
-    for k in 0..1 {
+    let mut output: HashMap<(i32, i32, i32), f32> = 
+        HashMap::new();
+    for k in 0..nobjs {
         // get the initial indices
         for agent in 0..model.num_agents {
             for task in 0..model.tasks.size {
-                println!("A: {}, T: {} Obj: {} Val: {:.2}",
-                    agent, task, k, x[k * bl + init_states[pid]]);
+                //println!("A: {}, T: {} Obj: {} Val: {:.2}",
+                //    agent, task, k, x[k * bl + init_states[pid]]);
+                output.insert((agent as i32, task as i32, k as i32), 
+                    x[k * bl + init_states[pid]]);
                 pid+=1;
             }
         }
         pid = 0;
     }
-    
+    output
 }

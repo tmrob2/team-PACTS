@@ -101,6 +101,12 @@ pub fn multiobj_argmaxR(
 
     assert_eq!(row_block, pi.len() as i32);
 
+
+    // The idea of this algorithm is to get the kth objective for each 
+    // product model and each action 
+    // then move to the k + 1 objective and repeat
+    let row_len = row_block as usize; 
+
     for r in 0..row_block as usize {
         let rowlookup = ridx[r] as usize;
         let k = (M.i[rowlookup + 1] - M.i[rowlookup]) as usize;
@@ -111,9 +117,11 @@ pub fn multiobj_argmaxR(
                     //println!("p: {}, rowblock: {}", M.p[M.i[rowlookup] as usize + j_], nobjs);
                     let c: usize = M.p[M.i[rowlookup] as usize + j_] as usize 
                         - pi[r] as usize * nobjs; 
-                    let idx = (c % nobjs) * row_block as usize + r;
-                    //println!("idx {} = [{} = {}] * {} + {}", idx, c, c % 4, row_block, r);
+                    // The trick is to idenstify which objective c is. 
+                    let cnew = c % nobjs;
+                    let idx = cnew * row_len + r;
                     output[idx] = M.x[M.i[rowlookup] as usize + j_];
+                    //println!("idx {} = [{} = {}] * {} + {} => val: {}", idx, c, cnew, row_block, r, output[idx]);
                 }
             }
         }

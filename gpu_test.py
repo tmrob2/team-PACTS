@@ -59,14 +59,14 @@ Rcsr = ce.compress(R)
 #print("x", Pcsr.x)
 csr = scipy.sparse.csr_array((Pcsr.x, Pcsr.p, Pcsr.i), shape=(Pcsr.m, Pcsr.n)).toarray();
 
-print("\Transition matrix")
-for r in range(Pcsr.m):
-    print("|", end=" ")
-    for c in range(Pcsr.n):
-        if c < Pcsr.n - 1:
-            print(f"{csr[r, c]:.2f}", end=" ")
-        else:
-            print(f"{csr[r, c]:.2f} |")
+#print("\Transition matrix")
+#for r in range(Pcsr.m):
+#    print("|", end=" ")
+#    for c in range(Pcsr.n):
+#        if c < Pcsr.n - 1:
+#            print(f"{csr[r, c]:.2f}", end=" ")
+#        else:
+#            print(f"{csr[r, c]:.2f} |")
 
 print("CSR construction correct", (csr == csr_test).all())
 
@@ -304,37 +304,35 @@ print("m:", NobjSparse.m)
 print("n", NobjSparse.n)
 print("nz", NobjSparse.nz)
 
-nobjscipy = scipy.sparse.csr_array(
-    (NobjSparse.x, NobjSparse.p, NobjSparse.i),
-    shape=(NobjSparse.m, NobjSparse.n)
-).toarray()
-obj = 0
-rbl = data.transition_prod_block_size
-cbl = data.transition_prod_block_size       
-#cbl = data.transition_prod_block_size
-rstart = obj * rbl
-rend = (obj + 1) * rbl
-cstart = obj * cbl
-cend = (obj + 1) * cbl
-for r in range(rstart, rend):
-    print("|", end=" ")
-    for c in range(cstart, cend):
-        val = nobjscipy[r, c]
-        if c < cend - 1:
-            if val == 0:
-                print(f"0.  ", end=" ")
-            else:
-                print(f"{val:.2f}", end=" ")
-        else:
-            if val == 0:
-                print(f"0.    |",)
-            else:
-                print(f"{val:.2f}")
-
-
 ce.test_gpu_value_iteration(
     scpm,
     msg_env,
-    [0.25, 0.25, 0.25, 0.25],
-    0.0001
+    [0., 0., 0.5, 0.5],
+    0.000001 
+)
+
+mission = ce.Mission()
+for repeat in range(100):
+    dfa = message_sending_task(repeat + 1)
+    mission.add_task(dfa)
+
+scpm = ce.GPUSCPM(mission, 2, list(range(2)))
+
+#ce.test_gpu_value_iteration(
+#    scpm,
+#    msg_env,
+#    [0., 0., 1/3, 1/3, 1/3],
+#    0.000001 
+#   )
+
+#w = [0., 0., 1/3, 1/3, 1/3]
+w = [0.] * 2 + [1./10.] * 100
+t = [-50, -50] + [0.5] * 100
+eps = 0.00001
+ce.test_gpu_synth(
+    scpm, 
+    msg_env, 
+    w,
+    eps,
+    t
 )

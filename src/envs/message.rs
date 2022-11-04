@@ -4,6 +4,7 @@ use hashbrown::HashMap;
 use crate::agent::agent::Env;
 use crate::gpu_scpm::dp::gpu_value_iteration;
 use crate::gpu_scpm::gpu_model::GPUSCPM;
+use crate::gpu_scpm::synth::gpu_synth;
 use crate::{generic_scheduler_synthesis_without_execution, test_csr_create_ffi, GPUProblemMetaData, deconstruct, double_vec, policy_optimisation_ffi};
 use crate::sparse::definition::CxxMatrixf32;
 use crate::sparse::{compress, argmax};
@@ -396,7 +397,7 @@ pub fn test_policy_optimisation(
     for _ in 0..(num_actions) {
         init_value_.extend(&init_value);
     }
-    println!("w_: \n{:?}", w_);
+    println!("|w_|: {:?}", w_.len());
 
     assert_eq!(w_.len(), R.n as usize);
     assert_eq!(init_value_.len(), P.n as usize);
@@ -418,8 +419,8 @@ pub fn test_policy_optimisation(
         block_size,
         num_actions
     );
-    println!("y\n{:.2?}\n", &y[.. block_size as usize]);
-    println!("Pi[{}]\n{:?}\n", policy.len(), policy);
+    //println!("y\n{:.2?}\n", &y[.. block_size as usize]);
+    //println!("Pi[{}]\n{:?}\n", policy.len(), policy);
     policy
 }
 
@@ -520,4 +521,15 @@ pub fn test_gpu_value_iteration(
     eps: f32
 ) {
     gpu_value_iteration(model, env, &w, eps);
+}
+
+#[pyfunction]
+pub fn test_gpu_synth(
+    model: &mut gpu_model::GPUSCPM,
+    env: &mut MessageSender,
+    mut w: Vec<f32>,
+    eps: f32,
+    t: Vec<f32>
+) {
+    gpu_synth(model, env, &mut w, eps, &t)
 }
