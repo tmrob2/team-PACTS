@@ -229,18 +229,6 @@ argmaxP = scipy.sparse.csr_array(
     shape=(data.transition_prod_block_size, data.transition_prod_block_size)
 ).toarray()
 
-#print("transition block size", data.transition_prod_block_size)
-#print("reward block size", data.reward_obj_prod_block_size)
-#
-#print("\nArgmax Trans matrix @ test policy: \n",pitest2)
-#for r in range(data.transition_prod_block_size):
-#    print("|", end=" ")
-#    for c in range(data.transition_prod_block_size):
-#        if c < data.transition_prod_block_size - 1:
-#            print(f"{argmaxP[r, c]:.2f}", end=" ")
-#        else:
-#            print(f"{argmaxP[r, c]:.2f} |")
-
 a2t2gpuvalue = ce.test_initial_policy(
     pitest2, 
     Pcsr, 
@@ -313,6 +301,8 @@ ce.test_gpu_value_iteration(
     0.000001 
 )
 
+# SCALABLE: EXPERIMENT SECTION
+
 NUM_AGENTS = 50
 NUM_TASKS = 100
 mission = ce.Mission()
@@ -321,13 +311,6 @@ for repeat in range(NUM_TASKS):
     mission.add_task(dfa)
 
 scpm = ce.GPUSCPM(mission, NUM_AGENTS, list(range(2)))
-
-#ce.test_gpu_value_iteration(
-#    scpm,
-#    msg_env,
-#    [0., 0., 1/3, 1/3, 1/3],
-#    0.000001 
-#   )
 
 #w = [0., 0., 1/5, 1/5]
 w = [0.] * NUM_AGENTS + [1./NUM_TASKS] * NUM_TASKS
