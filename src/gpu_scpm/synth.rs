@@ -1,8 +1,10 @@
 use super::gpu_model::GPUSCPM;
 use super::dp::gpu_value_iteration;
+use crate::sparse::argmax;
 use std::{hash::Hash, time::Instant};
 use crate::{Env, Solution, GenericSolutionFunctions,
-    DefineSolution, blas_dot_productf32, new_targetf32, solverf32};
+    DefineSolution, blas_dot_productf32, new_targetf32, solverf32, 
+    sparse::definition::CxxMatrixf32, GPUProblemMetaData, construct_gpu_problem};
 use hashbrown::{HashMap, HashSet};
 use ordered_float::{self, OrderedFloat};
 
@@ -14,11 +16,23 @@ and references to model, and env.
 */
 
 fn gpu_value_iteration_wrapper<S, E>(
-    model: &mut GPUSCPM, env: &mut E, w: &[f32], eps: f32, t: &[f32]
+    model: &mut GPUSCPM, 
+    env: &mut E, 
+    w: &[f32], 
+    eps: f32, 
+    t: &[f32],
+    argmaxP: &CxxMatrixf32,
+    argmaxR: &CxxMatrixf32,
+    Pcsr: &CxxMatrixf32,
+    Rcsr: &CxxMatrixf32,
+    data: &GPUProblemMetaData,
+    init_pi: &[i32]
 ) -> Vec<f32>
 where S: Copy + std::fmt::Debug + Hash + Eq + Send + Sync + 'static, 
 E: Env<S>, Solution<S>: DefineSolution<S> + GenericSolutionFunctions<S> {
-    let output = gpu_value_iteration(model, env, w, eps);
+    let output = 
+        gpu_value_iteration(model, env, w, eps, argmaxP, argmaxR, 
+            Pcsr, Rcsr, data, init_pi);
     // with the hashmap returned from value iteration determine an ordering
     println!("# Agents: {}, # Tasks: {}", model.num_agents, model.tasks.size);
     // for a particular task determine the total cost for a particular agent
@@ -81,7 +95,6 @@ pub fn gpu_synth<S, E>(
 )
 where S: Copy + std::fmt::Debug + Hash + Eq + Send + Sync + 'static, 
 E: Env<S>, Solution<S>: DefineSolution<S> + GenericSolutionFunctions<S> {
-    let t1 = Instant::now();
     let mut tnew = t.to_vec();
     let mut hullset: HashMap<usize, Vec<f32>> = HashMap::new();
     let mut hullset_X: Vec<Vec<f32>> = Vec::new();
@@ -93,13 +106,42 @@ E: Env<S>, Solution<S>: DefineSolution<S> + GenericSolutionFunctions<S> {
     let mut W: HashSet<Vec<OrderedFloat<f32>>> = HashSet::new();
     let mut schedulers: HashMap<usize, HashMap<(i32, i32), Vec<f32>>> = HashMap::new();
     let mut allocation_acc: Vec<(i32, i32, i32, Vec<f32>)> = Vec::new();
-
+    
+    let (mat, init_pi, rmat, data) = 
+    construct_gpu_problem(model, env);
+    
+    // Transition and rewards matrices are consumed and replaces by 
+    // their CSR equivalents. 
+    //println!("init pi: \n{:?}", init_pi);
+    let Pcsr = crate::sparse::compress::compress(mat);
+    let Rcsr = crate::sparse::compress::compress(rmat);
+    
+    let argmaxP = argmax::argmaxM(
+        &Pcsr, 
+        &init_pi, 
+        data.transition_prod_block_size as i32, 
+        data.transition_prod_block_size as i32
+    );
+    
+    let argmaxR = argmax::argmaxM(
+        &Rcsr, 
+        &init_pi, 
+        data.transition_prod_block_size as i32, 
+        data.reward_obj_prod_block_size as i32
+    );
+    
+    let t1 = Instant::now();
     // Starting with the initial w generate new hull points
-    let r = gpu_value_iteration_wrapper(model, env, w, eps, t);
+    let mut times: Vec<f32> = Vec::new();
+    let t2 = Instant::now();
+    let r = gpu_value_iteration_wrapper(model, env, w, eps, t, &argmaxP, &argmaxR, 
+        &Pcsr, &Rcsr, &data, &init_pi);
+    times.push(t2.elapsed().as_secs_f32());
     W.insert(w.iter().cloned().map(|x| OrderedFloat(x)).collect::<Vec<OrderedFloat<f32>>>());
     let wrl = blas_dot_productf32(&r[..], &w[..]);
     let wt = blas_dot_productf32(&tnew, &w);
     println!("wt: {:.3?}, wrl: {:.3?}, wrl < wt: {}", wt, wrl, wrl < wt);
+    //println!("r: {:?}", r);
     if wrl < wt {
         println!("wrl < wt, new target required!");
         temp_hullset_X = hullset_X.clone();
@@ -152,7 +194,10 @@ E: Env<S>, Solution<S>: DefineSolution<S> + GenericSolutionFunctions<S> {
                     }
                     false => { 
                         // generate a new hull point
-                        let r = gpu_value_iteration_wrapper(model, env, w, eps, t);
+                        let t2 = Instant::now();
+                        let r = gpu_value_iteration_wrapper(model, env, w, eps, t, &argmaxP, 
+                            &argmaxR, &Pcsr, &Rcsr, &data, &init_pi);
+                        times.push(t2.elapsed().as_secs_f32());
                         /*for (agent_, task_, r_) in alloc.into_iter() {
                             allocation_acc.push((count as i32, agent_, task_, r_));
                         }*/
@@ -160,6 +205,7 @@ E: Env<S>, Solution<S>: DefineSolution<S> + GenericSolutionFunctions<S> {
                         let wrl = blas_dot_productf32(&r[..], &w[..]);
                         let wt = blas_dot_productf32(&tnew[..], &w[..]);
                         println!("wt: {:.3?}, wrl: {:.3?}, wrl < wt: {}", wt, wrl, wrl < wt);
+                        //println!("r: {:?}", r);
                         if wrl < wt {
                             temp_hullset_X = hullset_X.clone();
                             temp_hullset_X.insert(0, r.to_vec());
@@ -198,5 +244,7 @@ E: Env<S>, Solution<S>: DefineSolution<S> + GenericSolutionFunctions<S> {
             Err(e) => {lpvalid = false;}
         }
     }
-    println!("Time: {:.3}", t1.elapsed().as_secs_f32());
+    let gpu_total_time: f32 = 
+        times.iter().fold(0., |acc, val| acc + *val) / times.len() as f32;
+    println!("Time: {:.3}s, GPU uptime: {:.3}s", t1.elapsed().as_secs_f32(), gpu_total_time);
 }

@@ -947,8 +947,8 @@ where S: Copy + std::fmt::Debug + Hash + Eq + Send + Sync + 'static,
                 .map(|(_, v)| *v)
                 .sum();
             
-                println!("agent {}, task: {}, base_idx: {}", 
-                prod.agent_id, prod.task_id, block_size + action * prod_block);
+                //println!("agent {}, task: {}, base_idx: {}", 
+                //prod.agent_id, prod.task_id, block_size + action * prod_block);
 
             // we need to consume this matrix at this point so as not to double up on memory
             // insert the triple into the large coo mat

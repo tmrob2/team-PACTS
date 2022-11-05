@@ -255,7 +255,7 @@ where S: Copy + std::fmt::Debug + Eq + Hash, E: Env<S> {
         P.nz = P.x.len() as i32;
         let R: &mut DenseMatrixf32 = 
             product_mdp.rewards_mat.get_mut(action).unwrap();
-        R.m = vec![-1_000.; size as usize * nobjs];
+        R.m = vec![-f32::MAX; size as usize * nobjs];
         R.cols = nobjs;
         R.rows = size as usize;
     }

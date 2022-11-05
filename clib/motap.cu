@@ -8,7 +8,7 @@
 #include <thrust/extrema.h>
 #include <thrust/execution_policy.h>
 
-int MAX_ITERATIONS = 100;
+int MAX_ITERATIONS = 1000;
 
 /*
 #######################################################################
@@ -116,7 +116,7 @@ void create_policy(float *a, int*b, int prod_block, int num_actions) {
     for (int k = 0; k < prod_block; k ++) {
         float tmp_max = 0;
         int tmp_action = -1;
-        int current_action = b[k];
+        //int current_action = b[k];
         int value_of_current_action = a[b[k] * prod_block + k];
         for (int i = 0; i < num_actions; i++) {
             if (a[i * prod_block + k] > tmp_max) {
@@ -166,7 +166,7 @@ void create_policy(float *a, int*b, int prod_block, int num_actions) {
 }
 
 
-void test_csr_spmv(
+int test_csr_spmv(
     int *csr_row, 
     int *csr_col, 
     float *csr_vals, 
@@ -186,7 +186,6 @@ void test_csr_spmv(
     cusparseHandle_t handle = NULL;
     cusparseCreate(&handle);
     cusparseSpMatDescr_t descrC = NULL;
-    cusparseStatus_t status = CUSPARSE_STATUS_SUCCESS;
 
     //allocate dCsrRowPtr, dCsrColPtr, dCsrValPtr
     int *dCsrRowPtr, *dCsrColPtr;
@@ -204,7 +203,7 @@ void test_csr_spmv(
     cudaMemcpy(dCsrRowPtr, csr_row, sizeof(int) * m, cudaMemcpyHostToDevice);
 
     // create the sparse CSR matrix in device memory
-    status = cusparseCreateCsr(
+    CHECK_CUSPARSE(cusparseCreateCsr(
         &descrC, // MATRIX DESCRIPTION
         m, // NUMBER OF ROWS
         n, // NUMBER OF COLS
@@ -216,7 +215,7 @@ void test_csr_spmv(
         CUSPARSE_INDEX_32I, // INDEX TYPE COLS
         CUSPARSE_INDEX_BASE_ZERO, // BASE INDEX TYPE
         CUDA_R_32F // DATA TYPE
-    );
+    ));
 
     float alpha = 1.0;
     float beta = 1.0;
@@ -266,9 +265,11 @@ void test_csr_spmv(
     cudaFree(dY);
     cudaFree(dBuffer);
 
+    return 0;
+
 }
 
-void test_csr_create(
+int test_csr_create(
     int m,
     int n,
     int nnz,
@@ -280,7 +281,6 @@ void test_csr_create(
     cusparseCreate(&handle);
 
     cusparseSpMatDescr_t descrP = NULL;
-    cusparseStatus_t status = CUSPARSE_STATUS_SUCCESS;
 
     // allocated the device memory for the COO matrix
     int *dCOORowPtr, *dCOOColPtr;
@@ -295,7 +295,7 @@ void test_csr_create(
     cudaMemcpy(dCOOColPtr, j, sizeof(int) * nnz, cudaMemcpyHostToDevice);
     cudaMemcpy(dCOORowPtr, x, sizeof(int) * (m + 1), cudaMemcpyHostToDevice);
 
-    status = cusparseCreateCsr(
+    CHECK_CUSPARSE(cusparseCreateCsr(
         &descrP,
         m,
         n,
@@ -307,7 +307,7 @@ void test_csr_create(
         CUSPARSE_INDEX_32I, // COL IND
         CUSPARSE_INDEX_BASE_ZERO, // BASE INDEX TYPE
         CUDA_R_32F // DATA TYPE
-    );
+    ));
 
     // convert the trans output to device memory
 
@@ -319,6 +319,8 @@ void test_csr_create(
     cudaFree(dCOORowPtr);
     cudaFree(dCOOColPtr);
     cudaFree(dCOOValPtr);
+
+    return 0;
 }
 
 int initial_policy_value(
@@ -360,15 +362,12 @@ int initial_policy_value(
 
     cusparseHandle_t handle = NULL;
     cusparseCreate(&handle);
-    cudaError_t cudaStat;
     cublasHandle_t blashandle;
     cublasCreate(&blashandle);
 
 
     cusparseSpMatDescr_t descrP = NULL;
     cusparseSpMatDescr_t descrR = NULL;
-    cusparseStatus_t status = CUSPARSE_STATUS_SUCCESS;
-    cublasStatus_t blas_status = CUBLAS_STATUS_SUCCESS;
 
     // allocated the device memory for the COO matrix
 
@@ -390,7 +389,7 @@ int initial_policy_value(
     cudaMemcpy(dPCsrRowPtr, pi, sizeof(int) * pm, cudaMemcpyHostToDevice);
     
     // create the sparse CSR matrix in device memory
-    status = cusparseCreateCsr(
+    CHECK_CUSPARSE(cusparseCreateCsr(
         &descrP, // MATRIX DESCRIPTION
         pm, // NUMBER OF ROWS
         pn, // NUMBER OF COLS
@@ -402,7 +401,7 @@ int initial_policy_value(
         CUSPARSE_INDEX_32I, // INDEX TYPE COLS
         CUSPARSE_INDEX_BASE_ZERO, // BASE INDEX TYPE
         CUDA_R_32F // DATA TYPE
-    );
+    ));
     
     // ----------------------------------------------------------------
     //                       Rewards Matrix
@@ -420,7 +419,7 @@ int initial_policy_value(
     cudaMemcpy(dRCsrRowPtr, ri, sizeof(int) * rm, cudaMemcpyHostToDevice);
 
     // create the sparse CSR matrix in device memory
-    status = cusparseCreateCsr(
+    CHECK_CUSPARSE(cusparseCreateCsr(
         &descrR, // MATRIX DESCRIPTION
         rm, // NUMBER OF ROWS
         rn, // NUMBER OF COLS
@@ -432,7 +431,7 @@ int initial_policy_value(
         CUSPARSE_INDEX_32I, // INDEX TYPE COLS
         CUSPARSE_INDEX_BASE_ZERO, // BASE INDEX TYPE
         CUDA_R_32F // DATA TYPE
-    );
+    ));
 
     // ----------------------------------------------------------------
     //                      Start of VI
@@ -443,7 +442,7 @@ int initial_policy_value(
     float alpha = 1.0;
     float beta = 1.0;
     float *epsilon = (float*) malloc(pm * sizeof(float));
-    int iepsilon;
+    //int iepsilon;
 
     // assign the cuda memory for the vectors
     cusparseDnVecDescr_t vecX, vecY;
@@ -541,7 +540,7 @@ int initial_policy_value(
         The gpu memory shoulf already be allocated, i.e. we are summing
         dY + dRMv
         */
-        cublasSaxpy(blashandle, pm, &alpha, dRMv, 1, dY, 1);
+        CHECK_CUBLAS(cublasSaxpy(blashandle, pm, &alpha, dRMv, 1, dY, 1));
         
         // ---------------------COMPUTE EPSILON---------------------------
 
@@ -568,35 +567,35 @@ int initial_policy_value(
     
     //cudaMemcpy(rmv, dRMv, rm *sizeof(float), cudaMemcpyDeviceToHost);
     //destroy the vector descriptors
-    cusparseDestroySpMat(descrP);
-    cusparseDestroySpMat(descrR);
-    cusparseDestroyDnVec(vecX);
-    cusparseDestroyDnVec(vecY);
-    cusparseDestroyDnVec(vecRMv);
-    cusparseDestroyDnVec(vecW);
-    cusparseDestroy(handle);
-    cublasDestroy(blashandle);
+    CHECK_CUSPARSE(cusparseDestroySpMat(descrP));
+    CHECK_CUSPARSE(cusparseDestroySpMat(descrR));
+    CHECK_CUSPARSE(cusparseDestroyDnVec(vecX));
+    CHECK_CUSPARSE(cusparseDestroyDnVec(vecY));
+    CHECK_CUSPARSE(cusparseDestroyDnVec(vecRMv));
+    CHECK_CUSPARSE(cusparseDestroyDnVec(vecW));
+    CHECK_CUSPARSE(cusparseDestroy(handle));
+    CHECK_CUBLAS(cublasDestroy(blashandle));
 
     // Free the device memory
-    cudaFree(dPCsrColPtr);
-    cudaFree(dPCsrRowPtr);
-    cudaFree(dPCsrValPtr);
-    cudaFree(dRCsrColPtr);
-    cudaFree(dRCsrRowPtr);
-    cudaFree(dRCsrValPtr);
+    CHECK_CUDA(cudaFree(dPCsrColPtr));
+    CHECK_CUDA(cudaFree(dPCsrRowPtr));
+    CHECK_CUDA(cudaFree(dPCsrValPtr));
+    CHECK_CUDA(cudaFree(dRCsrColPtr));
+    CHECK_CUDA(cudaFree(dRCsrRowPtr));
+    CHECK_CUDA(cudaFree(dRCsrValPtr));
     //cudaFree(d_eps);
-    cudaFree(dX);
-    cudaFree(dY);
-    cudaFree(dStaticY);
-    cudaFree(dZ);
-    cudaFree(dRw);
-    cudaFree(dRMv);
-    cudaFree(dRstaticMx);
-    cudaFree(dBuffer);
-    cudaFree(dBufferR);
+    CHECK_CUDA(cudaFree(dX));
+    CHECK_CUDA(cudaFree(dY));
+    CHECK_CUDA(cudaFree(dStaticY));
+    CHECK_CUDA(cudaFree(dZ));
+    CHECK_CUDA(cudaFree(dRw));
+    CHECK_CUDA(cudaFree(dRMv));
+    CHECK_CUDA(cudaFree(dRstaticMx));
+    CHECK_CUDA(cudaFree(dBuffer));
+    CHECK_CUDA(cudaFree(dBufferR));
     free(epsilon);
     free(static_y);
-    
+    return 0;
 }
 
 int policy_optimisation(
@@ -627,15 +626,10 @@ int policy_optimisation(
     */
     cusparseHandle_t handle = NULL;
     cusparseCreate(&handle);
-    cudaError_t cudaStat;
     cublasHandle_t blashandle;
     cublasCreate(&blashandle);
-
-
     cusparseSpMatDescr_t descrP = NULL;
     cusparseSpMatDescr_t descrR = NULL;
-    cusparseStatus_t status = CUSPARSE_STATUS_SUCCESS;
-    cublasStatus_t blas_status = CUBLAS_STATUS_SUCCESS;
 
     // ----------------------------------------------------------------
     //                             POLICY
@@ -728,8 +722,9 @@ int policy_optimisation(
     // --------------TRANSITION MATRIX MULTIPLICATION SETUP------------
     float alpha = 1.0;
     float beta = 1.0;
-    float *epsilon = (float*) malloc(pm * sizeof(float));
-    int iepsilon;
+    //float *epsilon = (float*) malloc(pm * sizeof(float));
+    //float *z = (float *) malloc(pm * sizeof(float));
+    //int iepsilon;
 
     // assign the cuda memory for the vectors
     cusparseDnVecDescr_t vecX, vecY;
@@ -824,7 +819,7 @@ int policy_optimisation(
         CHECK_CUSPARSE(cusparseSpMV(
             handle, CUSPARSE_OPERATION_NON_TRANSPOSE, 
             &alpha, descrP, vecX, &beta, vecY, CUDA_R_32F, 
-            CUSPARSE_MV_ALG_DEFAULT, dBuffer));
+            CUSPARSE_MV_ALG_DEFAULT, dBuffer));    
 
         // ---------------------SUM DENSE VECTORS-------------------------
 
@@ -838,10 +833,21 @@ int policy_optimisation(
         // what is the difference between dY and dX
 
         // EPSILON COMPUTATION
+
         
         max_value_launcher(dY, dX, d_tmp, dZ, PI, PI_new, block_size, nact);
-        //
-        CHECK_CUBLAS(cublasIsamax(blashandle, pm, dZ, 1, &iepsilon));
+          
+        /*CHECK_CUDA(cudaMemcpy(y, dZ, pm * sizeof(float), cudaMemcpyDeviceToHost));  
+        printf("eps\n");
+        for (int k = 0; k<pm; k++) {
+            if (y[k] > 1) {
+                printf("Y[%i] = %.2f\n", k, y[k]);
+            }
+        }
+        printf("\n");
+        */
+        
+        
         thrust::device_ptr<float> dev_ptr(dZ);
         maxeps = *thrust::max_element(thrust::device, dev_ptr, dev_ptr + pm);
         //
@@ -853,6 +859,10 @@ int policy_optimisation(
         CHECK_CUBLAS(cublasScopy(blashandle, pm, dStaticY, 1, dY, 1));
         CHECK_CUBLAS(cublasScopy(blashandle, pm, d_tmp, 1, dX, 1));
         // std::cout << "EPS_TEST " << dev_ptr[iepsilon - 1] << "THRUST "<< maxeps << std::endl;
+
+        
+        CHECK_CUDA(cudaMemcpy(y, dX, pm * sizeof(float), cudaMemcpyDeviceToHost));  
+        // we need to deal with infinities        
         if (maxeps < eps) {
             printf("OPTIMISED POLICY GENERATED; EPS TOL REACHED in %i ITERATIONS\n", algo_i);
             break;
@@ -865,35 +875,36 @@ int policy_optimisation(
 
     // MEMORY MANAGEMENT
     //destroy the vector descriptors
-    cusparseDestroySpMat(descrP);
-    cusparseDestroySpMat(descrR);
-    cusparseDestroyDnVec(vecX);
-    cusparseDestroyDnVec(vecY);
-    cusparseDestroyDnVec(vecRMv);
-    cusparseDestroyDnVec(vecW);
-    cusparseDestroy(handle);
-    cublasDestroy(blashandle);
+    CHECK_CUSPARSE(cusparseDestroySpMat(descrP));
+    CHECK_CUSPARSE(cusparseDestroySpMat(descrR));
+    CHECK_CUSPARSE(cusparseDestroyDnVec(vecX));
+    CHECK_CUSPARSE(cusparseDestroyDnVec(vecY));
+    CHECK_CUSPARSE(cusparseDestroyDnVec(vecRMv));
+    CHECK_CUSPARSE(cusparseDestroyDnVec(vecW));
+    CHECK_CUSPARSE(cusparseDestroy(handle));
+    CHECK_CUBLAS(cublasDestroy(blashandle));
 
     // Free the device memory
-    cudaFree(dPCsrColPtr);
-    cudaFree(dPCsrRowPtr);
-    cudaFree(dPCsrValPtr);
-    cudaFree(dRCsrColPtr);
-    cudaFree(dRCsrRowPtr);
-    cudaFree(dRCsrValPtr);
-    cudaFree(dX);
-    cudaFree(dY);
-    cudaFree(d_tmp);
-    cudaFree(dStaticY);
-    cudaFree(dZ);
-    cudaFree(dRw);
-    cudaFree(dRMv);
-    cudaFree(dRstaticMx);
-    cudaFree(dBuffer);
-    cudaFree(dBufferR);
-    cudaFree(PI);
-    cudaFree(PI_new);
-    free(epsilon);
+    CHECK_CUDA(cudaFree(dPCsrColPtr));
+    CHECK_CUDA(cudaFree(dPCsrRowPtr));
+    CHECK_CUDA(cudaFree(dPCsrValPtr));
+    CHECK_CUDA(cudaFree(dRCsrColPtr));
+    CHECK_CUDA(cudaFree(dRCsrRowPtr));
+    CHECK_CUDA(cudaFree(dRCsrValPtr));
+    CHECK_CUDA(cudaFree(dX));
+    CHECK_CUDA(cudaFree(dY));
+    CHECK_CUDA(cudaFree(d_tmp));
+    CHECK_CUDA(cudaFree(dStaticY));
+    CHECK_CUDA(cudaFree(dZ));
+    CHECK_CUDA(cudaFree(dRw));
+    CHECK_CUDA(cudaFree(dRMv));
+    CHECK_CUDA(cudaFree(dRstaticMx));
+    CHECK_CUDA(cudaFree(dBuffer));
+    CHECK_CUDA(cudaFree(dBufferR));
+    CHECK_CUDA(cudaFree(PI));
+    CHECK_CUDA(cudaFree(PI_new));
+    //free(epsilon);
+    return 0;
 }
 
 int multi_objective_values(
@@ -912,15 +923,10 @@ int multi_objective_values(
     */
     cusparseHandle_t handle = NULL;
     cusparseCreate(&handle);
-    cudaError_t cudaStat;
     cublasHandle_t blashandle;
     cublasCreate(&blashandle);
-
-
     cusparseSpMatDescr_t descrP = NULL;
     cusparseSpMatDescr_t descrR = NULL;
-    cusparseStatus_t status = CUSPARSE_STATUS_SUCCESS;
-    cublasStatus_t blas_status = CUBLAS_STATUS_SUCCESS;
 
     // allocated the device memory for the COO matrix
 
@@ -1000,6 +1006,9 @@ int multi_objective_values(
     float maxeps;
     maxeps = 0.0f;
 
+    // TEMP
+    //float* y = (float*) malloc(pm * sizeof(float));
+
     for (int algo_i = 0; algo_i < MAX_ITERATIONS; algo_i ++) {
         
         CHECK_CUSPARSE(cusparseSpMV(
@@ -1015,14 +1024,13 @@ int multi_objective_values(
         CHECK_CUDA(cudaMemcpy(x, dY, pm *sizeof(float), cudaMemcpyDeviceToHost));
         printf("BEFORE M.v\n");
         for (int k = 0; k<pm; k++) {
-            if (k == 0) {
-                printf("Y: %.2f, ", x[k]);
-            } else {
-                printf("%.2f, ", x[k]);
+            if (x[k] > 0.0f) {
+                printf("(%i, %.2f), ", k, x[k]);
             }
         }
         printf("\n");
         */
+        
 
         abs_diff_launcher(dX, dY, dZ, pm);
         //CHECK_CUBLAS(cublasIsamax(blashandle, pm, dZ, 1, &iepsilon));
@@ -1033,7 +1041,7 @@ int multi_objective_values(
         CHECK_CUBLAS(cublasScopy(blashandle, pm, dY, 1, dX, 1));
         // RESET Y
         CHECK_CUBLAS(cublasScopy(blashandle, pm, dStaticY, 1, dY, 1));
-        //printf("\nepsilon: %f\n", dev_ptr[iepsilon - 1]);
+        //std::cout << "EPS" << maxeps << std::endl;
         if (maxeps < eps) {
             printf("MULTI-OBJECTIVE VALUES GENERATED; EPS TOL REACHED in %i ITERATIONS\n", algo_i);
             break;
@@ -1043,24 +1051,26 @@ int multi_objective_values(
     CHECK_CUDA(cudaMemcpy(x, dX, pm *sizeof(float), cudaMemcpyDeviceToHost));
 
     //destroy the vector descriptors
-    cusparseDestroySpMat(descrP);
-    cusparseDestroySpMat(descrR);
-    cusparseDestroyDnVec(vecX);
-    cusparseDestroyDnVec(vecY);
-    cusparseDestroy(handle);
-    cublasDestroy(blashandle);
+    CHECK_CUSPARSE(cusparseDestroySpMat(descrP));
+    CHECK_CUSPARSE(cusparseDestroySpMat(descrR));
+    CHECK_CUSPARSE(cusparseDestroyDnVec(vecX));
+    CHECK_CUSPARSE(cusparseDestroyDnVec(vecY));
+    CHECK_CUSPARSE(cusparseDestroy(handle));
+    CHECK_CUBLAS(cublasDestroy(blashandle));
 
     // Free the device memory
-    cudaFree(dPCsrColPtr);
-    cudaFree(dPCsrRowPtr);
-    cudaFree(dPCsrValPtr);
+    CHECK_CUDA(cudaFree(dPCsrColPtr));
+    CHECK_CUDA(cudaFree(dPCsrRowPtr));
+    CHECK_CUDA(cudaFree(dPCsrValPtr));
     //cudaFree(d_eps);
-    cudaFree(dRValPtr);
-    cudaFree(dX);
-    cudaFree(dY);
-    cudaFree(dStaticY);
-    cudaFree(dZ);
-    cudaFree(dBuffer);
+    CHECK_CUDA(cudaFree(dRValPtr));
+    CHECK_CUDA(cudaFree(dX));
+    CHECK_CUDA(cudaFree(dY));
+    CHECK_CUDA(cudaFree(dStaticY));
+    CHECK_CUDA(cudaFree(dZ));
+    CHECK_CUDA(cudaFree(dBuffer));
+    //free(y); // TEMP
+    return 0;
 }
 
 

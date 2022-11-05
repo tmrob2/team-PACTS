@@ -25,7 +25,7 @@ def hyperplane_solver(X, t, nobj):
     # solve the problem
     status = model.solve(solver)
     solution = [value(w[i]) for i in range(nobj)]
-    print("w: ", solution)
+    #print("w: ", solution)
     return solution
 
 

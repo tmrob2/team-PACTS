@@ -141,6 +141,8 @@ vmv = ce.test_initial_policy(
     eps
 )
 
+print("FINISHED INITIAL POLICY TEST\n")
+
 testval = ce.test_cpu_converged_init_pi(
     cpu_scpm,
     msg_env,
@@ -311,12 +313,14 @@ ce.test_gpu_value_iteration(
     0.000001 
 )
 
+NUM_AGENTS = 50
+NUM_TASKS = 100
 mission = ce.Mission()
-for repeat in range(100):
+for repeat in range(NUM_TASKS):
     dfa = message_sending_task(repeat + 1)
     mission.add_task(dfa)
 
-scpm = ce.GPUSCPM(mission, 2, list(range(2)))
+scpm = ce.GPUSCPM(mission, NUM_AGENTS, list(range(2)))
 
 #ce.test_gpu_value_iteration(
 #    scpm,
@@ -325,9 +329,9 @@ scpm = ce.GPUSCPM(mission, 2, list(range(2)))
 #    0.000001 
 #   )
 
-#w = [0., 0., 1/3, 1/3, 1/3]
-w = [0.] * 2 + [1./10.] * 100
-t = [-50, -50] + [0.5] * 100
+#w = [0., 0., 1/5, 1/5]
+w = [0.] * NUM_AGENTS + [1./NUM_TASKS] * NUM_TASKS
+t = [-2000.] * NUM_AGENTS + [0.2] * NUM_TASKS
 eps = 0.00001
 ce.test_gpu_synth(
     scpm, 

@@ -2,8 +2,8 @@ use hashbrown::HashMap;
 
 use super::gpu_model;
 use crate::{Env, Solution, GenericSolutionFunctions,
-    DefineSolution, construct_gpu_problem, initial_policy_value_ffi,
-    policy_optimisation_ffi, multi_objective_values_ffi};
+    DefineSolution, initial_policy_value_ffi,
+    policy_optimisation_ffi, multi_objective_values_ffi, sparse::definition::CxxMatrixf32, GPUProblemMetaData};
 use std::hash::Hash;
 use crate::sparse::argmax;
 
@@ -12,35 +12,18 @@ pub fn gpu_value_iteration<S, E>(
     env: &mut E,
     w: &[f32],
     eps: f32,
+    argmaxP: &CxxMatrixf32,
+    argmaxR: &CxxMatrixf32,
+    Pcsr: &CxxMatrixf32,
+    Rcsr: &CxxMatrixf32, 
+    data: &GPUProblemMetaData,
+    init_pi: &[i32]
 ) ->  HashMap<(i32, i32, i32), f32>
 where S: Copy + std::fmt::Debug + Hash + Eq + Send + Sync + 'static, 
 E: Env<S>, Solution<S>: DefineSolution<S> + GenericSolutionFunctions<S> {
     let nobjs = model.num_agents + model.tasks.size;
     let num_actions = env.get_action_space().len();
     let num_models = model.num_agents * model.tasks.size;
-
-    let (mat, init_pi, r, data) = 
-        construct_gpu_problem(model, env);
-
-    // Transition and rewards matrices are consumed and replaces by 
-    // their CSR equivalents. 
-    //println!("init pi: \n{:?}", init_pi);
-    let Pcsr = crate::sparse::compress::compress(mat);
-    let Rcsr = crate::sparse::compress::compress(r);
-    
-    let argmaxP = argmax::argmaxM(
-        &Pcsr, 
-        &init_pi, 
-        data.transition_prod_block_size as i32, 
-        data.transition_prod_block_size as i32
-    );
-    
-    let argmaxR = argmax::argmaxM(
-        &Rcsr, 
-        &init_pi, 
-        data.transition_prod_block_size as i32, 
-        data.reward_obj_prod_block_size as i32
-    );
     
     //let mut value = vec![0.; data.transition_prod_block_size];
     let mut x = vec![0.; data.transition_prod_block_size];
@@ -93,10 +76,6 @@ E: Env<S>, Solution<S>: DefineSolution<S> + GenericSolutionFunctions<S> {
         data.transition_prod_block_size as i32,
         num_actions as i32
     );
-    //println!("updated policy: \n{:?}", policy);
-    //println!("output value: \n{:?}", y);
-    
-    //println!("|trans block|: {}", data.transition_prod_block_size);
     
     let argmaxP = argmax::multiobj_argmaxP(
         &Pcsr, 
@@ -112,13 +91,6 @@ E: Env<S>, Solution<S>: DefineSolution<S> + GenericSolutionFunctions<S> {
         data.transition_prod_block_size as i32, 
         nobjs
     );
-
-    //let bl_ = data.transition_prod_block_size;
-    //println!("argmax R: \n{:?}", argmaxR.iter().enumerate().collect::<Vec<(usize, &f32)>>()); //[2 * bl_..3 * bl_]);
-    //println!("argmax R: \n{:?}", &argmaxR); //[2 * bl_..3 * bl_]);
-
-    println!("|P| = {} x {}", argmaxP.m, argmaxP.n);
-    println!("|R| = {}", argmaxR.len());
     
     let mut x = vec![0.; data.transition_prod_block_size * nobjs];
     assert_eq!(argmaxR.len(), argmaxP.m as usize);
@@ -134,7 +106,6 @@ E: Env<S>, Solution<S>: DefineSolution<S> + GenericSolutionFunctions<S> {
     // get the indices of x which correspond to the initial values
     // for each of the product models
     let mut pid = 0;
-    let init_states = data.init_state_idx;
     let bl = data.transition_prod_block_size;
     let mut output: HashMap<(i32, i32, i32), f32> = 
         HashMap::new();
@@ -145,7 +116,7 @@ E: Env<S>, Solution<S>: DefineSolution<S> + GenericSolutionFunctions<S> {
                 //println!("A: {}, T: {} Obj: {} Val: {:.2}",
                 //    agent, task, k, x[k * bl + init_states[pid]]);
                 output.insert((agent as i32, task as i32, k as i32), 
-                    x[k * bl + init_states[pid]]);
+                    x[k * bl + data.init_state_idx[pid]]);
                 pid+=1;
             }
         }

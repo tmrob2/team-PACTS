@@ -51,7 +51,7 @@ for t in range(NUM_TASKS):
 scpm = ce.SCPM(mission, NUM_AGENTS, list(range(2)))
 
 w = [0] * NUM_AGENTS + [1. / NUM_TASKS] * NUM_TASKS
-eps = 0.0001
-target = [-500.] * NUM_TASKS + [0.2] * NUM_TASKS
+eps = 0.00001
+target = [-2000.] * NUM_TASKS + [0.2] * NUM_TASKS
 
 tnew = ce.msg_experiment(scpm, msg_env, w, target, eps)

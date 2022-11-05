@@ -520,7 +520,31 @@ pub fn test_gpu_value_iteration(
     w: Vec<f32>,
     eps: f32
 ) {
-    gpu_value_iteration(model, env, &w, eps);
+    // construct the GPU problem first
+    let (mat, init_pi, rmat, data) = 
+        construct_gpu_problem(model, env);
+
+    // Transition and rewards matrices are consumed and replaces by 
+    // their CSR equivalents. 
+    //println!("init pi: \n{:?}", init_pi);
+    let Pcsr = crate::sparse::compress::compress(mat);
+    let Rcsr = crate::sparse::compress::compress(rmat);
+
+    let argmaxP = argmax::argmaxM(
+        &Pcsr, 
+        &init_pi, 
+        data.transition_prod_block_size as i32, 
+        data.transition_prod_block_size as i32
+    );
+
+    let argmaxR = argmax::argmaxM(
+        &Rcsr, 
+        &init_pi, 
+        data.transition_prod_block_size as i32, 
+        data.reward_obj_prod_block_size as i32
+    );
+    gpu_value_iteration(model, env, &w, eps, &argmaxP, &argmaxR, 
+        &Pcsr, &Rcsr, &data, &init_pi);
 }
 
 #[pyfunction]
