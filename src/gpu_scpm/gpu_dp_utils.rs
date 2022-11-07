@@ -1,6 +1,6 @@
 use rand::seq::SliceRandom;
 use std::hash::Hash;
-use crate::{gpu_scpm::gpu_model::MOProductMDP, sparse::{definition::CxxMatrixf32, argmax::argmaxM}};
+use crate::{gpu_scpm::gpu_model::MOProductMDP};
 
 pub fn random_policy<S>(prod: &MOProductMDP<S>) -> Vec<f64>
 where S: Copy + Hash + Eq {

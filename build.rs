@@ -13,6 +13,7 @@ fn main() {
         .flag("-gencode")
         .flag("arch=compute_86,code=sm_86")
         .file("clib/motap.cu")
+        .file("clib/async_motap.cu")
         //.file("myclib/test_cublas.cu")
         .compile("libcudatest.a");
 

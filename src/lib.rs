@@ -14,16 +14,16 @@ pub mod gpu_scpm;
 pub mod sparse;
 
 use std::hash::Hash;
+use std::mem::size_of;
 use std::mem;
-use std::thread::current;
 use std::time::Instant;
 use agent::agent::Env;
 use executor::executor::{GenericSolutionFunctions, DefineSolution, 
     Solution, Execution, DefineSerialisableExecutor};
+use gpu_scpm::gpu_model_comp::{self, GPUSCPMCompact};
 use pyo3::prelude::*;
 //use pyo3::exceptions::PyValueError;
 use hashbrown::HashMap;
-use rand_chacha::rand_core::block;
 use scpm::model::SCPM; // , MOProductMDP};
 use algorithm::synth::scheduler_synthesis;
 //test_scpm, warehouse_scheduler_synthesis
@@ -42,7 +42,7 @@ use cblas_sys::{cblas_dcopy, cblas_dgemv, cblas_dscal, cblas_ddot, cblas_sdot};
 //use algorithm::dp::value_iteration;
 use float_eq::float_eq;
 use std::fs;
-use sparse::definition::{CxxMatrixf32, CSparsef32};
+use sparse::definition::CxxMatrixf32;
 use sparse::compress::compress;
 
 use crate::gpu_scpm::gpu_dp_utils::random_policy;
@@ -268,6 +268,19 @@ pub fn test_csr_spmv_ffi(
             m, 
             n
         )
+    }
+}
+
+// check the streaming properties of the GPU device
+extern "C" {
+    fn check_device_properties();
+}
+
+#[pyfunction]
+#[pyo3(name="device_props")]
+pub fn check_device_properties_ffi() {
+    unsafe {
+        check_device_properties();
     }
 }
 
@@ -825,9 +838,17 @@ where S: Copy + std::fmt::Debug + Hash + Eq + Send + Sync + 'static,
     E: Env<S>, Solution<S>: DefineSolution<S> + GenericSolutionFunctions<S> {
     println!("Constructing products");
     let mut solution: Solution<S> = Solution::new_(model.tasks.size);
+    let mut total_states: usize = 0;
+    let mut total_transitions: usize = 0;
     let prods = model.construct_products(env);
+    // for each of the products get the model size and sum
     let t1 = Instant::now();
     // todo input the "outputs" into the scheduler synthesis algorithm to capture data
+    for p in prods.iter() {
+        total_states += p.state_size();
+        total_transitions += p.transition_size();
+    }
+    println!("Model size => |S|: {}, |P|: {}", total_states, total_transitions);
     let (
         pis, 
         alloc, 
@@ -865,7 +886,7 @@ where S: Copy + std::fmt::Debug + Hash + Eq + Send + Sync + 'static,
 
 // This is a function for constructing the data structures which will go into
 // the GPU for computation
-fn construct_gpu_problem<S, E>
+fn naive_construct_gpu_problem<S, E>
 (
     model: &mut gpu_model::GPUSCPM,
     env: &mut E,
@@ -995,6 +1016,62 @@ where S: Copy + std::fmt::Debug + Hash + Eq + Send + Sync + 'static,
     (mat, initial_policy, r, meta)
 }
 
+pub struct GPUStream {
+    pub stream: Vec<CxxMatrixf32>,
+}
+
+fn construct_compact_gpu_problem<S, E>
+(
+    model: &mut gpu_model_comp::GPUSCPMCompact,
+    env: &mut E,
+)
+where S: Copy + std::fmt::Debug + Hash + Eq + Send + Sync + 'static, 
+    E: Env<S>, Solution<S>: DefineSolution<S> + GenericSolutionFunctions<S>  {
+    let mut prods = model.construct_products(env);
+
+    // determine the size of the sparse matrix
+    // for each of the product model transition matrices which is the largest
+    let mut max_size: i32 = 0;
+    let mut nz = 0;
+    let mut rmax_nz: i32 = 0;
+    let mut matrix_ranges: Vec<i32> = Vec::new();
+    let mut initial_policy: Vec<i32> = Vec::new();
+    let nobjs: usize = model.num_agents + model.tasks.size;
+    let mut init_state_idx: Vec<usize> = Vec::new();
+    
+    for prod in prods.iter() {
+        nz += prod.transition_mat.nz;
+    }
+
+    println!("number of non zero entries: {}", nz);
+    println!("BYTES threshold: {}", (nz as usize * size_of::<f32>()) / 2);
+
+    let mut stream: Vec<CxxMatrixf32> = vec![CxxMatrixf32::new(); 4];
+    let mut row_adjust: Vec<usize> = vec![0; 4];
+    let mut col_adjust: Vec<usize> = vec![0; 4];
+
+    for (ix, prod) in prods.iter_mut().enumerate() {
+        // create a mutable reference to the stream matrix
+        let P = &mut stream[ix % 4];
+        // add all of the elements from the product matrix 
+        let mut i: Vec<i32> = prod.transition_mat.i.drain(..)
+            .map(|x| x + row_adjust[ix] as i32)
+            .collect();
+        let mut j: Vec<i32> = prod.transition_mat.p.drain(..)
+            .map(|x| x + col_adjust[ix] as i32)
+            .collect();
+        let mut x: Vec<f32> = prod.transition_mat.x.to_owned();
+        P.i.append(&mut i);
+        P.p.append(&mut j);
+        P.x.append(&mut x);
+        P.nz += prod.transition_mat.nz;
+        P.m += *model.state_spaces.get(&(ix as i32)).unwrap();
+        P.n += prod.states.len() as i32;
+        row_adjust[ix] += *model.state_spaces.get(&(ix as i32)).unwrap() as usize;
+        col_adjust[ix] += prod.states.len();
+    }
+}
+
 /// A Python module implemented in Rust.
 #[pymodule]
 fn ce(_py: Python, m: &PyModule) -> PyResult<()> {
@@ -1006,6 +1083,7 @@ fn ce(_py: Python, m: &PyModule) -> PyResult<()> {
     //m.add_class::<Team>()?;
     m.add_class::<SCPM>()?;
     m.add_class::<GPUSCPM>()?;
+    m.add_class::<GPUSCPMCompact>()?;
     m.add_class::<Warehouse>()?;
     m.add_class::<MessageSender>()?;
     m.add_class::<Executor>()?;
@@ -1033,5 +1111,7 @@ fn ce(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(message::test_nobj_argmax_csr, m)?)?;
     m.add_function(wrap_pyfunction!(message::test_gpu_value_iteration, m)?)?;
     m.add_function(wrap_pyfunction!(message::test_gpu_synth, m)?)?;
+    m.add_function(wrap_pyfunction!(check_device_properties_ffi,m)?)?;
+    m.add_function(wrap_pyfunction!(message::test_construct_compact_gpu,m)?)?;
     Ok(())
 }

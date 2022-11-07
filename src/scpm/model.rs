@@ -108,6 +108,18 @@ impl<S> MOProductMDP<S> where S: Copy + Eq + Hash {
             R.m[c * size + sidx] = rewards[c];
         }
     }
+
+    pub fn state_size(&self) -> usize {
+        self.states.len()
+    }
+
+    pub fn transition_size(&self) -> usize {
+        let mut nnz_total: usize = 0;
+        for act in self.actions.iter() {
+            nnz_total += self.transition_mat.get(act).unwrap().nz as usize;
+        }
+        nnz_total
+    }
 }
 
 fn process_mo_reward(
